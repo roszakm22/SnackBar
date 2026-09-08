@@ -9,11 +9,12 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Approved revenue, expenses, net performance, and customer totals
 - Cash-box counts, deposits, and withdrawals
 - Card balance audits against approved Venmo sales and non-sales deposits
-- Dated outlook targets with progress and the daily amount needed to reach each goal
+- Automatic 7-, 30-, and 90-day outlooks based on the latest 28 days of revenue and expenses
 - Starting card funds included in all-time net performance and outlook progress
 - Donations and other card deposits that affect the audit without counting as income
 - Manual ledger entries
 - Public performance overview at `/`
+- Public customer leaderboard with a selectable date range
 - Private review, cash box, card audit, outlooks, and ledger workspace at `/manage`
 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.
@@ -30,7 +31,7 @@ This is a Vinext Cloudflare Worker with a D1 database.
 4. Limit the Allow policy to the email addresses that should manage the snack bar. The exact path rules also cover their child routes unless a more-specific Access application overrides them.
 5. Disable or separately protect Worker preview URLs so a preview deployment cannot bypass the management policy.
 
-The root page and `/api/overview` stay public. That API returns daily aggregates and operational timestamps only; it does not return names, Venmo notes, individual transactions, cash balances, or card balances.
+The root page and `/api/overview` stay public. That API returns daily aggregates, leaderboard totals, and operational timestamps; it does not return Venmo notes, individual transactions, cash balances, or current card balances.
 
 The production D1 database is already configured as `snackbar-ledger` with the `DB` binding.
 

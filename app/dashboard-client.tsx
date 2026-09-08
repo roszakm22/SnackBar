@@ -6,7 +6,7 @@ import {
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
   RotateCcw, ShoppingBasket, Target, Trash2, Upload, UserRound, WalletCards,
 } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,14 +25,13 @@ type Batch = { id: string; fileName: string; importedCount: number; duplicateCou
 type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; calculatedChangeCents: number; note: string };
 type CardAudit = { id: string; checkedAt: string; actualBalanceCents: number; expectedBalanceCents: number; varianceCents: number; ledgerMovementCents: number };
 type CardAdjustment = { id: string; occurredAt: string; amountCents: number; note: string };
-type OutlookTarget = { id: string; targetDate: string; targetCents: number; label: string; createdAt: string };
 type LedgerData = {
   pending: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
-  openingCardBalanceCents: number; outlooks: OutlookTarget[];
+  openingCardBalanceCents: number;
   cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; adjustmentCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[] };
 };
 
-const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, outlooks: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
+const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
@@ -53,7 +52,6 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [manualOpen, setManualOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
   const [cardDepositOpen, setCardDepositOpen] = useState(false);
-  const [targetOpen, setTargetOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -84,17 +82,41 @@ export default function DashboardClient({ displayName }: { displayName: string }
     return { incoming, outgoing, starting, net: starting + incoming - outgoing, average: sales.length ? incoming / sales.length : 0 };
   }, [data.openingCardBalanceCents, filtered, period]);
 
-  const outlookBalance = useMemo(() => data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0), [data.ledger, data.openingCardBalanceCents]);
+  const outlook = useMemo(() => {
+    const today = new Date(); today.setHours(23, 59, 59, 999);
+    const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 27); cutoff.setHours(0, 0, 0, 0);
+    const recent = data.ledger.filter((row) => {
+      const date = new Date(row.occurredAt);
+      return date >= cutoff && date <= today;
+    });
+    const revenueCents = recent.filter((row) => row.amountCents > 0).reduce((sum, row) => sum + row.amountCents, 0);
+    const expenseCents = recent.filter((row) => row.amountCents < 0).reduce((sum, row) => sum + Math.abs(row.amountCents), 0);
+    const currentBalanceCents = data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0);
+    const dailyRevenueCents = revenueCents / 28;
+    const dailyExpenseCents = expenseCents / 28;
+    const dailyNetCents = dailyRevenueCents - dailyExpenseCents;
+    const horizons = [7, 30, 90].map((days) => {
+      const date = new Date(today); date.setDate(date.getDate() + days);
+      return { days, date, revenueCents: dailyRevenueCents * days, expenseCents: dailyExpenseCents * days, balanceCents: currentBalanceCents + dailyNetCents * days };
+    });
+    return { revenueCents, expenseCents, dailyNetCents, currentBalanceCents, horizons };
+  }, [data.ledger, data.openingCardBalanceCents]);
 
   const chartData = useMemo(() => {
-    const days = new Map<string, { label: string; revenue: number; expenses: number; net: number }>();
+    const days = new Map<string, { label: string; revenue: number; expenses: number }>();
     [...filtered].reverse().forEach((row) => {
       const key = row.occurredAt.slice(0, 10);
-      const item = days.get(key) || { label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(row.occurredAt)), revenue: 0, expenses: 0, net: 0 };
+      const item = days.get(key) || { label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(row.occurredAt)), revenue: 0, expenses: 0 };
       if (row.amountCents >= 0) item.revenue += row.amountCents / 100; else item.expenses += Math.abs(row.amountCents) / 100;
-      item.net += row.amountCents / 100; days.set(key, item);
+      days.set(key, item);
     });
-    return [...days.values()].slice(-45);
+    let cumulativeRevenue = 0;
+    let cumulativeExpenses = 0;
+    return [...days.values()].map((day) => {
+      cumulativeRevenue += day.revenue;
+      cumulativeExpenses += day.expenses;
+      return { label: day.label, revenue: cumulativeRevenue, expenseLine: cumulativeExpenses };
+    }).slice(-45);
   }, [filtered]);
 
   const topPeople = useMemo(() => {
@@ -168,17 +190,6 @@ export default function DashboardClient({ displayName }: { displayName: string }
     if (result) { setCardDepositOpen(false); event.currentTarget.reset(); }
   };
 
-  const createTarget = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget);
-    const result = await post({ action: "outlook_create", date: form.get("date"), amount: form.get("amount"), label: form.get("label") }, "Outlook target added.");
-    if (result) { setTargetOpen(false); event.currentTarget.reset(); }
-  };
-
-  const removeTarget = async (id: string) => {
-    if (!window.confirm("Delete this outlook target?")) return;
-    await post({ action: "outlook_delete", id }, "Outlook target deleted.");
-  };
-
   const review = async (classification: "snack_bar" | "personal") => {
     const current = data.pending[0]; if (!current) return;
     await post({ action: "review", ids: [current.id], classification }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
@@ -223,8 +234,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
               <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.incoming)}</strong><ArrowUpRight/></article><article><span>Expenses</span><strong>{money(stats.outgoing)}</strong><ArrowDownRight/></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign/></article></div>
             </section>
             <section className="dashboard-grid">
-              <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">DAY BY DAY</span><h2>Money moving through the bar</h2></div></div>
-                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ea4d2f" stopOpacity={.38}/><stop offset="95%" stopColor="#ea4d2f" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v) => money(Number(v) * 100)}/><Area type="monotone" dataKey="revenue" stroke="#ea4d2f" strokeWidth={3} fill="url(#rev)"/><Area type="monotone" dataKey="expenses" stroke="#191914" strokeWidth={2} fill="transparent"/></AreaChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the day-by-day chart."/>}
+              <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">BREAK-EVEN PROGRESS</span><h2>Revenue catching expenses</h2><p>Running revenue compared with the total spent.</p></div></div>
+                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#356859" stopOpacity={.36}/><stop offset="95%" stopColor="#356859" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v, name) => [money(Number(v) * 100), name === "revenue" ? "Revenue" : "Expenses to cover"]}/><Area type="monotone" dataKey="revenue" stroke="#356859" strokeWidth={3} fill="url(#rev)"/><Line type="stepAfter" dataKey="expenseLine" stroke="#b4493e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the break-even chart."/>}
               </article>
               <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
               <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>
@@ -253,9 +264,10 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </TabsContent>
 
           <TabsContent value="outlooks" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">MONEY TARGETS</span><h2>Outlooks</h2><p>Set the balance the snack bar should reach by a certain date and see the pace required to get there.</p></div><Button onClick={() => setTargetOpen(true)}><Plus/> Add target</Button></div>
-            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT TRACKED BALANCE</span><strong>{money(outlookBalance)}</strong><p>Starting card funds + approved income − expenses</p></div><Target/></section>
-            {data.outlooks.length ? <section className="outlook-grid">{data.outlooks.map((target) => <OutlookCard key={target.id} target={target} currentCents={outlookBalance} onDelete={() => void removeTarget(target.id)}/>)}</section> : <article className="panel"><Empty text="Add a dated money target to start the outlook."/></article>}
+            <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue and expenses.</p></div></div>
+            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − expenses</p></div><div className="pace-callout"><span>Current net pace</span><b className={outlook.dailyNetCents >= 0 ? "positive" : "negative"}>{money(outlook.dailyNetCents)}/day</b></div></section>
+            {data.ledger.length ? <section className="outlook-grid">{outlook.horizons.map((projection) => <ProjectionCard key={projection.days} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
+            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>28-day expense pace</span><strong>{money(outlook.expenseCents / 4)} / week</strong></div><p>These are straight-line estimates. They update automatically whenever the ledger changes and do not count donations as sales.</p></article>
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
@@ -272,8 +284,6 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
       <Dialog open={cardDepositOpen} onOpenChange={setCardDepositOpen}><DialogContent><DialogHeader><DialogTitle>Add a non-sales deposit</DialogTitle><DialogDescription>Use this for donated money or other funds added to the card. It raises the expected card balance without counting as snack bar income.</DialogDescription></DialogHeader><form id="card-deposit-form" className="form-grid" onSubmit={cardDeposit}><div><Label htmlFor="card-deposit-amount">Amount</Label><Input id="card-deposit-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="card-deposit-note">Description</Label><Input id="card-deposit-note" name="note" placeholder="Donation, starting funds…"/></div></form><DialogFooter><Button type="submit" form="card-deposit-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <HandCoins/>} Add deposit</Button></DialogFooter></DialogContent></Dialog>
 
-      <Dialog open={targetOpen} onOpenChange={setTargetOpen}><DialogContent><DialogHeader><DialogTitle>Add an outlook target</DialogTitle><DialogDescription>Choose a date and the total tracked balance the snack bar should have reached by then.</DialogDescription></DialogHeader><form id="target-form" className="form-grid" onSubmit={createTarget}><div><Label htmlFor="target-date">Target date</Label><Input id="target-date" name="date" type="date" required/></div><div><Label htmlFor="target-amount">Target balance</Label><Input id="target-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div className="full"><Label htmlFor="target-label">Label <span className="optional-label">optional</span></Label><Input id="target-label" name="label" placeholder="End of semester, halfway point…" maxLength={80}/></div></form><DialogFooter><Button type="submit" form="target-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Target/>} Add target</Button></DialogFooter></DialogContent></Dialog>
-
       <Dialog open={manualOpen} onOpenChange={setManualOpen}><DialogContent><DialogHeader><DialogTitle>Add a manual ledger entry</DialogTitle><DialogDescription>For purchases, reimbursements or anything that did not arrive through Venmo or a cash count.</DialogDescription></DialogHeader><form id="manual-form" className="form-grid" onSubmit={manual}><div><Label htmlFor="manual-date">Date</Label><Input id="manual-date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required/></div><div><Label htmlFor="manual-amount">Amount</Label><Input id="manual-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="manual-direction">Direction</Label><select className="native-select" id="manual-direction" name="direction"><option value="incoming">Money in</option><option value="outgoing">Money out</option></select></div><div><Label htmlFor="manual-source">Source</Label><select className="native-select" id="manual-source" name="source"><option value="manual">Manual</option><option value="cash">Cash</option></select></div><div><Label htmlFor="manual-person">Person / account</Label><Input id="manual-person" name="counterparty" placeholder="Costco, cash customer…"/></div><div><Label htmlFor="manual-note">Note</Label><Input id="manual-note" name="note" placeholder="What was this for?"/></div></form><DialogFooter><Button type="submit" form="manual-form" disabled={busy}>Add to ledger</Button></DialogFooter></DialogContent></Dialog>
       <Toaster richColors position="bottom-right"/>
     </div>
@@ -284,18 +294,10 @@ function Empty({ text }: { text: string }) { return <div className="empty-state"
 function Loading() { return <div className="loading-row"><Loader2 className="spin"/> Loading the books…</div>; }
 function History({ title, children }: { title: string; children: React.ReactNode }) { return <article className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">LOG BOOK</span><h2>{title}</h2></div></div><div className="history-list">{children}</div></article>; }
 
-function OutlookCard({ target, currentCents, onDelete }: { target: OutlookTarget; currentCents: number; onDelete: () => void }) {
-  const targetDate = new Date(`${target.targetDate}T12:00:00`);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const daysLeft = Math.ceil((targetDate.getTime() - today.getTime()) / 86_400_000);
-  const remaining = Math.max(0, target.targetCents - currentCents);
-  const progress = Math.max(0, Math.min(100, target.targetCents ? currentCents / target.targetCents * 100 : 0));
-  const met = remaining === 0;
-  const status = met ? "Target reached" : daysLeft < 0 ? "Target missed" : daysLeft === 0 ? "Due today" : `${money(Math.ceil(remaining / daysLeft))} per day needed`;
-  return <article className={`outlook-card ${met ? "met" : daysLeft < 0 ? "missed" : ""}`}>
-    <div className="outlook-card-top"><div><span>{target.label || "Balance target"}</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(targetDate)}</strong></div><Button variant="ghost" size="icon-sm" aria-label="Delete target" onClick={onDelete}><Trash2/></Button></div>
-    <div className="outlook-amount"><strong>{money(target.targetCents)}</strong><span>{status}</span></div>
-    <div className="outlook-track" aria-label={`${Math.round(progress)}% complete`}><span style={{ width: `${progress}%` }}/></div>
-    <div className="outlook-meta"><span>{Math.round(progress)}% reached</span><span>{met ? money(currentCents - target.targetCents) + " over" : money(remaining) + " remaining"}</span></div>
+function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; expenseCents: number; balanceCents: number } }) {
+  return <article className="outlook-card">
+    <div className="projection-date"><span>IN {projection.days} DAYS</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
+    <div className="outlook-amount"><strong>{money(projection.balanceCents)}</strong><span>projected balance</span></div>
+    <div className="projection-split"><span>Revenue <b>{money(projection.revenueCents)}</b></span><span>Expenses <b>{money(projection.expenseCents)}</b></span></div>
   </article>;
 }

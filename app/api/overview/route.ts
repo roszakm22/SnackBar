@@ -4,11 +4,11 @@ import { cardAudits, cashBoxEvents, transactions } from "../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const db = getDb();
     const rows = await db
-      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents })
+      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty })
       .from(transactions)
       .where(eq(transactions.classification, "snack_bar"))
       .orderBy(asc(transactions.occurredAt))
@@ -27,6 +27,19 @@ export async function GET() {
       days.set(date, day);
     }
 
+    const { searchParams } = new URL(request.url);
+    const fromValue = searchParams.get("from");
+    const toValue = searchParams.get("to");
+    const from = fromValue && /^\d{4}-\d{2}-\d{2}$/.test(fromValue) ? new Date(`${fromValue}T00:00:00Z`) : new Date(0);
+    const to = toValue && /^\d{4}-\d{2}-\d{2}$/.test(toValue) ? new Date(`${toValue}T23:59:59.999Z`) : new Date();
+    const leaders = new Map<string, { name: string; totalCents: number; purchases: number }>();
+    rows.filter((row) => row.amountCents > 0 && row.counterparty && row.occurredAt >= from && row.occurredAt <= to).forEach((row) => {
+      const current = leaders.get(row.counterparty) || { name: row.counterparty, totalCents: 0, purchases: 0 };
+      current.totalCents += row.amountCents;
+      current.purchases += 1;
+      leaders.set(row.counterparty, current);
+    });
+
     const [{ count: pendingCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(transactions)
@@ -41,6 +54,7 @@ export async function GET() {
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
       latestCardAuditAt: latestAudit?.checkedAt.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
+      leaders: [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 10),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load the overview.";

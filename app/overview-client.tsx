@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Loader2, LockKeyhole, ReceiptText, ShoppingBasket } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Loader2, LockKeyhole, ReceiptText, ShoppingBasket, Trophy } from "lucide-react";
+import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
-type OverviewData = { days: Day[]; pendingCount: number; latestCashCountAt: string | null; latestCardAuditAt: string | null; openingCardBalanceCents: number };
+type Leader = { name: string; totalCents: number; purchases: number };
+type OverviewData = { days: Day[]; pendingCount: number; latestCashCountAt: string | null; latestCardAuditAt: string | null; openingCardBalanceCents: number; leaders: Leader[] };
 
-const emptyData: OverviewData = { days: [], pendingCount: 0, latestCashCountAt: null, latestCardAuditAt: null, openingCardBalanceCents: 0 };
+const todayValue = new Date().toISOString().slice(0, 10);
+const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 29);
+const monthAgoValue = monthAgo.toISOString().slice(0, 10);
+const emptyData: OverviewData = { days: [], pendingCount: 0, latestCashCountAt: null, latestCardAuditAt: null, openingCardBalanceCents: 0, leaders: [] };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 const localDate = (value: string) => new Date(`${value}T12:00:00`);
@@ -17,10 +21,13 @@ export default function OverviewClient() {
   const [data, setData] = useState<OverviewData>(emptyData);
   const [period, setPeriod] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [leaderLoading, setLeaderLoading] = useState(false);
   const [error, setError] = useState("");
+  const [leaderFrom, setLeaderFrom] = useState(monthAgoValue);
+  const [leaderTo, setLeaderTo] = useState(todayValue);
 
   useEffect(() => {
-    fetch("/api/overview")
+    fetch(`/api/overview?from=${monthAgoValue}&to=${todayValue}`)
       .then(async (response) => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Could not load the overview.");
@@ -29,6 +36,23 @@ export default function OverviewClient() {
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load the overview."))
       .finally(() => setLoading(false));
   }, []);
+
+  const updateLeaderboard = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (leaderFrom > leaderTo) return setError("The leaderboard start date must be before the end date.");
+    setLeaderLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/overview?from=${leaderFrom}&to=${leaderTo}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not update the leaderboard.");
+      setData((current) => ({ ...current, leaders: result.leaders }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update the leaderboard.");
+    } finally {
+      setLeaderLoading(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     if (period === "all") return data.days;
@@ -46,11 +70,19 @@ export default function OverviewClient() {
     return { revenue, expenses, starting, net: starting + revenue - expenses, sales, average: sales ? revenue / sales : 0 };
   }, [data.openingCardBalanceCents, filtered, period]);
 
-  const chartData = useMemo(() => filtered.slice(-45).map((day) => ({
-    label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(localDate(day.date)),
-    revenue: day.revenueCents / 100,
-    expenses: day.expenseCents / 100,
-  })), [filtered]);
+  const chartData = useMemo(() => {
+    let cumulativeRevenue = 0;
+    let cumulativeExpenses = 0;
+    return filtered.map((day) => {
+      cumulativeRevenue += day.revenueCents / 100;
+      cumulativeExpenses += day.expenseCents / 100;
+      return {
+        label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(localDate(day.date)),
+        revenue: cumulativeRevenue,
+        expenseLine: cumulativeExpenses,
+      };
+    }).slice(-45);
+  }, [filtered]);
 
   const weeklyComparison = useMemo(() => {
     const currentWeekStart = new Date();
@@ -88,10 +120,10 @@ export default function OverviewClient() {
           <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.revenue)}</strong><ArrowUpRight /></article><article><span>Expenses</span><strong>{money(stats.expenses)}</strong><ArrowDownRight /></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign /></article></div>
         </section>
         <section className="dashboard-grid">
-          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">DAY BY DAY</span><h2>Money moving through the bar</h2></div></div>
-            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData}><defs><linearGradient id="public-rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ea4d2f" stopOpacity={.38}/><stop offset="95%" stopColor="#ea4d2f" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Area type="monotone" dataKey="revenue" stroke="#ea4d2f" strokeWidth={3} fill="url(#public-rev)"/><Area type="monotone" dataKey="expenses" stroke="#191914" strokeWidth={2} fill="transparent"/></AreaChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
+          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">BREAK-EVEN PROGRESS</span><h2>Revenue catching expenses</h2><p>Running revenue compared with the total spent.</p></div></div>
+            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#356859" stopOpacity={.36}/><stop offset="95%" stopColor="#356859" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value, name) => [money(Number(value) * 100), name === "revenue" ? "Revenue" : "Expenses to cover"]}/><Area type="monotone" dataKey="revenue" stroke="#356859" strokeWidth={3} fill="url(#public-rev)"/><Line type="stepAfter" dataKey="expenseLine" stroke="#b4493e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
-          <article className="panel public-summary"><span className="eyebrow">ABOUT THIS VIEW</span><h2>Performance without personal details</h2><p>The public dashboard shows combined daily totals and the starting card funds. Names, payment notes, individual transactions, cash counts, and the current card balance stay protected.</p></article>
+          <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><span className="rank">{index + 1}</span><div><strong>{leader.name}</strong><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
           <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestCardAuditAt ? `Card was last audited ${dateTime(data.latestCardAuditAt)}.` : "The card has not been audited yet."}</p></article>
           <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Daily revenue aligned Sunday through Saturday.</p></div></div>
             {weeklyComparison.hasData ? <div className="comparison-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={weeklyComparison.rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="day" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Legend/>{weeklyComparison.weeks.map((week, index) => <Line key={week.key} type="monotone" dataKey={week.key} name={week.label} stroke={["#9aaea6", "#627a99", "#d58850", "#356859"][index]} strokeWidth={index === 3 ? 3 : 2} dot={{ r: index === 3 ? 4 : 3 }} activeDot={{ r: 5 }}/>)}</LineChart></ResponsiveContainer></div> : <Empty text="Revenue from the last four weeks will appear here." />}
