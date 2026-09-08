@@ -187,10 +187,10 @@ export default function DashboardClient({ displayName }: { displayName: string }
       </header>
 
       <main className="workspace">
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue="review">
           <div className="nav-strip">
             <TabsList variant="line">
-              <TabsTrigger value="overview"><BarChart3/> Overview</TabsTrigger>
+              <a className="overview-nav-link" href="/"><BarChart3/> Overview</a>
               <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length}</span></TabsTrigger>
               <TabsTrigger value="cash"><Banknote/> Cash box</TabsTrigger>
               <TabsTrigger value="card"><CreditCard/> Card audit</TabsTrigger>

@@ -11,6 +11,8 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Card balance audits against approved Venmo sales and non-sales deposits
 - Donations and other card deposits that affect the audit without counting as income
 - Manual ledger entries
+- Public performance overview at `/`
+- Private review, cash box, card audit, and ledger workspace at `/manage`
 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.
 
@@ -20,7 +22,13 @@ This is a Vinext Cloudflare Worker with a D1 database.
 
 1. Connect this GitHub repository to a Cloudflare Workers Builds project.
 2. Use `npm run deploy` as the deploy command. It builds the Worker, applies the checked-in D1 migrations, and deploys the app.
-3. Protect the Worker with Cloudflare Access before importing financial data.
+3. In **Zero Trust > Access controls > Applications**, create a self-hosted application for the deployed hostname and protect both of these paths with the same Allow policy:
+   - `/manage`
+   - `/api/ledger`
+4. Limit the Allow policy to the email addresses that should manage the snack bar. The exact path rules also cover their child routes unless a more-specific Access application overrides them.
+5. Disable or separately protect Worker preview URLs so a preview deployment cannot bypass the management policy.
+
+The root page and `/api/overview` stay public. That API returns daily aggregates and operational timestamps only; it does not return names, Venmo notes, individual transactions, cash balances, or card balances.
 
 The production D1 database is already configured as `snackbar-ledger` with the `DB` binding.
 
