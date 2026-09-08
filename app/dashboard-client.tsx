@@ -1,0 +1,220 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDownRight, ArrowUpRight, Banknote, BarChart3, CalendarDays, Check,
+  CircleDollarSign, ClipboardCheck, CreditCard, Loader2, Plus, ReceiptText,
+  RotateCcw, ShoppingBasket, Trash2, Upload, UserRound, WalletCards,
+} from "lucide-react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Toaster } from "@/components/ui/sonner";
+
+type Transaction = {
+  id: string; occurredAt: string; amountCents: number; source: "venmo" | "cash" | "manual";
+  direction: "incoming" | "outgoing"; counterparty: string; note: string; originalType: string;
+};
+type Batch = { id: string; fileName: string; importedCount: number; duplicateCount: number; skippedCount: number; createdAt: string };
+type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; calculatedChangeCents: number; note: string };
+type CardAudit = { id: string; checkedAt: string; actualBalanceCents: number; expectedBalanceCents: number; varianceCents: number; ledgerMovementCents: number };
+type LedgerData = {
+  pending: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
+  cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; lastAudit: CardAudit | null; history: CardAudit[] };
+};
+
+const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, lastAudit: null, history: [] } };
+const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+
+async function api(body?: Record<string, unknown>) {
+  const response = await fetch("/api/ledger", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Something went wrong.");
+  return result;
+}
+
+export default function DashboardClient({ displayName }: { displayName: string }) {
+  const [data, setData] = useState<LedgerData>(emptyData);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [period, setPeriod] = useState("all");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [movementOpen, setMovementOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const load = async () => {
+    try { setData(await api()); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Could not load the ledger."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const post = async (payload: Record<string, unknown>, success: string) => {
+    setBusy(true);
+    try { const result = await api(payload); toast.success(success); await load(); return result; }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Something went wrong."); return null; }
+    finally { setBusy(false); }
+  };
+
+  const filtered = useMemo(() => {
+    if (period === "all") return data.ledger;
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(period));
+    return data.ledger.filter((row) => new Date(row.occurredAt) >= cutoff);
+  }, [data.ledger, period]);
+
+  const stats = useMemo(() => {
+    const incoming = filtered.filter((x) => x.amountCents > 0).reduce((sum, x) => sum + x.amountCents, 0);
+    const outgoing = filtered.filter((x) => x.amountCents < 0).reduce((sum, x) => sum + Math.abs(x.amountCents), 0);
+    const sales = filtered.filter((x) => x.amountCents > 0);
+    return { incoming, outgoing, net: incoming - outgoing, average: sales.length ? incoming / sales.length : 0 };
+  }, [filtered]);
+
+  const chartData = useMemo(() => {
+    const days = new Map<string, { label: string; revenue: number; expenses: number; net: number }>();
+    [...filtered].reverse().forEach((row) => {
+      const key = row.occurredAt.slice(0, 10);
+      const item = days.get(key) || { label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(row.occurredAt)), revenue: 0, expenses: 0, net: 0 };
+      if (row.amountCents >= 0) item.revenue += row.amountCents / 100; else item.expenses += Math.abs(row.amountCents) / 100;
+      item.net += row.amountCents / 100; days.set(key, item);
+    });
+    return [...days.values()].slice(-45);
+  }, [filtered]);
+
+  const topPeople = useMemo(() => {
+    const totals = new Map<string, { total: number; visits: number }>();
+    filtered.filter((x) => x.amountCents > 0 && x.counterparty).forEach((x) => {
+      const current = totals.get(x.counterparty) || { total: 0, visits: 0 };
+      current.total += x.amountCents; current.visits += 1; totals.set(x.counterparty, current);
+    });
+    return [...totals.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
+  }, [filtered]);
+
+  const upload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const file = fileRef.current?.files?.[0];
+    if (!file) return toast.error("Choose a Venmo CSV first.");
+    const result = await post({ action: "import", csv: await file.text(), fileName: file.name }, "Venmo statement imported.");
+    if (result) { setUploadOpen(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  const manual = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "manual", amount: form.get("amount"), date: form.get("date"), direction: form.get("direction"), source: form.get("source"), counterparty: form.get("counterparty"), note: form.get("note") }, "Ledger entry added.");
+    if (result) { setManualOpen(false); event.currentTarget.reset(); }
+  };
+
+  const cashCount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "cash_count", balance: form.get("balance"), note: form.get("note") }, "Cash box counted and ledger updated.");
+    if (result) event.currentTarget.reset();
+  };
+
+  const cashMovement = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "cash_adjustment", eventType: form.get("eventType"), amount: form.get("amount"), note: form.get("note") }, "Cash movement recorded.");
+    if (result) { setMovementOpen(false); event.currentTarget.reset(); }
+  };
+
+  const cardAudit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "card_audit", balance: form.get("balance") }, "Card audit saved.");
+    if (result) event.currentTarget.reset();
+  };
+
+  const review = async (classification: "snack_bar" | "personal") => {
+    const current = data.pending[0]; if (!current) return;
+    await post({ action: "review", ids: [current.id], classification }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
+  };
+
+  const remove = async (id: string) => {
+    if (!window.confirm("Delete this ledger entry?")) return;
+    await post({ action: "delete", id }, "Ledger entry deleted.");
+  };
+
+  const current = data.pending[0];
+  const latestCount = data.cashEvents.find((x) => x.eventType === "count");
+  const latestAudit = data.cardAudit.lastAudit;
+  const varianceClass = !latestAudit || latestAudit.varianceCents === 0 ? "even" : latestAudit.varianceCents < 0 ? "short" : "over";
+
+  return (
+    <div className="app-shell">
+      <header className="masthead">
+        <div className="mast-inner">
+          <div className="brand-lockup"><div className="brand-stamp"><ShoppingBasket /></div><div><span className="unit-tag">DET 930</span><h1>Snack Bar</h1></div></div>
+          <div className="top-actions"><span className="welcome">Hey, {displayName}</span><Button variant="outline" onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button><Button className="upload-button" onClick={() => setUploadOpen(true)}><Upload/> Import Venmo</Button></div>
+        </div>
+      </header>
+
+      <main className="workspace">
+        <Tabs defaultValue="overview">
+          <div className="nav-strip">
+            <TabsList variant="line">
+              <TabsTrigger value="overview"><BarChart3/> Overview</TabsTrigger>
+              <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length}</span></TabsTrigger>
+              <TabsTrigger value="cash"><Banknote/> Cash box</TabsTrigger>
+              <TabsTrigger value="card"><CreditCard/> Card audit</TabsTrigger>
+              <TabsTrigger value="ledger"><ReceiptText/> Ledger</TabsTrigger>
+            </TabsList>
+            <label className="period-control">View <select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label>
+          </div>
+
+          <TabsContent value="overview" className="section-stack">
+            <section className="hero-grid">
+              <article className="net-card"><span className="eyebrow light">Net performance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{filtered.length} approved entries in this view</p><div className="net-stripe"><span>Revenue {money(stats.incoming)}</span><span>Expenses {money(stats.outgoing)}</span></div></article>
+              <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.incoming)}</strong><ArrowUpRight/></article><article><span>Expenses</span><strong>{money(stats.outgoing)}</strong><ArrowDownRight/></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign/></article></div>
+            </section>
+            <section className="dashboard-grid">
+              <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">DAY BY DAY</span><h2>Money moving through the bar</h2></div></div>
+                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ea4d2f" stopOpacity={.38}/><stop offset="95%" stopColor="#ea4d2f" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v) => money(Number(v) * 100)}/><Area type="monotone" dataKey="revenue" stroke="#ea4d2f" strokeWidth={3} fill="url(#rev)"/><Area type="monotone" dataKey="expenses" stroke="#191914" strokeWidth={2} fill="transparent"/></AreaChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the day-by-day chart."/>}
+              </article>
+              <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
+              <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="review" className="section-stack">
+            <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2><p>Only snack bar activity enters the ledger. Personal details are discarded.</p></div><div className="review-progress"><strong>{data.pending.length}</strong><span>left to review</span></div></div>
+            {loading ? <Loading/> : current ? <div className="review-stage"><article className="review-ticket"><div className="ticket-top"><Badge variant="outline">{current.source}</Badge><span>{shortDate(current.occurredAt)}</span></div><div className={`review-amount ${current.amountCents >= 0 ? "positive" : "negative"}`}>{money(current.amountCents)}</div><div className="review-person"><div className={`direction-icon ${current.amountCents >= 0 ? "in" : "out"}`}>{current.amountCents >= 0 ? <ArrowDownRight/> : <ArrowUpRight/>}</div><div><span>{current.amountCents >= 0 ? "From" : "To"}</span><h3>{current.counterparty || "Unknown person"}</h3></div></div><div className="review-note"><span>VENMO NOTE</span><p>{current.note || "No note included"}</p></div><div className="review-actions"><Button variant="outline" size="lg" disabled={busy} onClick={() => void review("personal")}><UserRound/> Personal</Button><Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} Snack bar</Button></div><p className="privacy-note">Personal transactions are excluded permanently and their details are not retained.</p></article></div> : <div className="all-clear"><Check/><h2>All caught up.</h2><p>Import another Venmo CSV whenever you have new activity.</p><Button onClick={() => setUploadOpen(true)}><Upload/> Import Venmo</Button></div>}
+          </TabsContent>
+
+          <TabsContent value="cash" className="section-stack">
+            <div className="page-heading"><div><span className="eyebrow">PHYSICAL CASH</span><h2>Cash box</h2><p>Count what is there. The change since the last count is added to the ledger automatically.</p></div><Dialog open={movementOpen} onOpenChange={setMovementOpen}><DialogTrigger asChild><Button variant="outline"><RotateCcw/> Record cash movement</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Record cash movement</DialogTitle><DialogDescription>Log money deliberately added to or removed from the box so the next count stays accurate.</DialogDescription></DialogHeader><form id="movement-form" className="form-grid" onSubmit={cashMovement}><div><Label htmlFor="eventType">Movement</Label><select className="native-select" id="eventType" name="eventType"><option value="withdrawal">Removed from box</option><option value="deposit">Added to box</option></select></div><div><Label htmlFor="move-amount">Amount</Label><Input id="move-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div className="full"><Label htmlFor="move-note">Note</Label><Input id="move-note" name="note" placeholder="Restock run, starting change…"/></div></form><DialogFooter><Button type="submit" form="movement-form" disabled={busy}>Save movement</Button></DialogFooter></DialogContent></Dialog></div>
+            <section className="cash-grid"><article className="cash-count-card"><div className="count-date"><CalendarDays/><span>Counting now<br/><b>{new Intl.DateTimeFormat("en-US", { dateStyle: "full" }).format(new Date())}</b></span></div><form onSubmit={cashCount}><Label htmlFor="cash-balance">How much is in the box?</Label><div className="money-input"><span>$</span><Input id="cash-balance" name="balance" inputMode="decimal" placeholder="0.00" required autoComplete="off"/></div><Label htmlFor="cash-note">Note <small>optional</small></Label><Input id="cash-note" name="note" placeholder="End of day count"/><Button size="lg" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Banknote/>} Count it & update ledger</Button></form></article><article className="balance-board"><span className="eyebrow light">LAST COUNT</span><strong>{latestCount ? money(latestCount.amountCents) : "—"}</strong><p>{latestCount ? dateTime(latestCount.occurredAt) : "No cash counts yet"}</p>{latestCount && <div className={latestCount.calculatedChangeCents >= 0 ? "count-change up" : "count-change down"}><span>Ledger change</span><b>{money(latestCount.calculatedChangeCents)}</b></div>}<small>First count establishes the opening cash. Later counts measure the change, adjusted for recorded deposits and withdrawals.</small></article></section>
+            <History title="Cash box history">{data.cashEvents.length ? data.cashEvents.map((event) => <div className="history-row" key={event.id}><div className="history-icon"><Banknote/></div><div><strong>{event.eventType === "count" ? "Cash count" : event.eventType === "withdrawal" ? "Cash removed" : "Cash added"}</strong><span>{dateTime(event.occurredAt)}{event.note ? ` · ${event.note}` : ""}</span></div><b>{money(event.amountCents)}</b>{event.eventType === "count" && <em>{money(event.calculatedChangeCents)} to ledger</em>}</div>) : <Empty text="Cash counts and movements will appear here."/>}</History>
+          </TabsContent>
+
+          <TabsContent value="card" className="section-stack">
+            <div className="page-heading"><div><span className="eyebrow">RECONCILIATION</span><h2>Card audit</h2><p>Enter what the card actually holds and compare it with approved Venmo activity.</p></div></div>
+            <section className="audit-grid"><article className="audit-form-card"><div className="expected-chip"><span>Ledger expects</span><strong>{money(data.cardAudit.expectedBalanceCents)}</strong></div><form onSubmit={cardAudit}><Label htmlFor="card-balance">What is the current card balance?</Label><div className="money-input"><span>$</span><Input id="card-balance" name="balance" inputMode="decimal" placeholder="0.00" required autoComplete="off"/></div><Button size="lg" disabled={busy}>{busy ? <Loader2 className="spin"/> : <ClipboardCheck/>} Run the audit</Button></form><p className="method-note">The first check compares against an opening balance of $0. After that, expected balance starts from the last actual balance plus approved Venmo movement.</p></article><article className={`audit-result ${varianceClass}`}><span className="eyebrow light">LATEST RESULT</span>{latestAudit ? <><div className="audit-status">{latestAudit.varianceCents === 0 ? "BALANCED" : latestAudit.varianceCents < 0 ? "SHORT" : "OVER"}</div><strong>{money(Math.abs(latestAudit.varianceCents))}</strong><div className="audit-pair"><span>Actual <b>{money(latestAudit.actualBalanceCents)}</b></span><span>Expected <b>{money(latestAudit.expectedBalanceCents)}</b></span></div><p>{dateTime(latestAudit.checkedAt)}</p></> : <><WalletCards/><h3>No audit yet</h3><p>Enter the current balance to create a baseline.</p></>}</article></section>
+            <History title="Audit history">{data.cardAudit.history.length ? data.cardAudit.history.map((audit) => <div className="history-row audit-history" key={audit.id}><div className={`status-dot ${audit.varianceCents === 0 ? "even" : audit.varianceCents < 0 ? "short" : "over"}`}/><div><strong>{dateTime(audit.checkedAt)}</strong><span>Expected {money(audit.expectedBalanceCents)} · actual {money(audit.actualBalanceCents)}</span></div><b>{audit.varianceCents === 0 ? "Balanced" : `${audit.varianceCents > 0 ? "+" : "−"}${money(Math.abs(audit.varianceCents))}`}</b></div>) : <Empty text="Completed card audits will appear here."/>}</History>
+          </TabsContent>
+
+          <TabsContent value="ledger" className="section-stack">
+            <div className="page-heading"><div><span className="eyebrow">APPROVED ACTIVITY</span><h2>The ledger</h2><p>Venmo, cash counts and manual entries in one record.</p></div><Button onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button></div>
+            <article className="panel table-panel">{loading ? <Loading/> : filtered.length ? <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Source</TableHead><TableHead>Person / account</TableHead><TableHead>Note</TableHead><TableHead className="amount-head">Amount</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell>{shortDate(row.occurredAt)}</TableCell><TableCell><Badge variant="outline">{row.source}</Badge></TableCell><TableCell>{row.counterparty || "—"}</TableCell><TableCell className="note-cell">{row.note || "—"}</TableCell><TableCell className={`amount-cell ${row.amountCents >= 0 ? "positive" : "negative"}`}>{money(row.amountCents)}</TableCell><TableCell><Button variant="ghost" size="icon-sm" aria-label="Delete transaction" onClick={() => void remove(row.id)}><Trash2/></Button></TableCell></TableRow>)}</TableBody></Table> : <Empty text="No approved entries in this period."/>}</article>
+            {data.batches.length > 0 && <History title="Recent imports">{data.batches.map((batch) => <div className="history-row" key={batch.id}><div className="history-icon"><Upload/></div><div><strong>{batch.fileName}</strong><span>{dateTime(batch.createdAt)}</span></div><b>{batch.importedCount} imported</b><em>{batch.duplicateCount} duplicates · {batch.skippedCount} skipped</em></div>)}</History>}
+          </TabsContent>
+        </Tabs>
+      </main>
+
+      <footer><span>SNACK BAR · DET 930</span><span>{data.personalCount} personal transaction{data.personalCount === 1 ? "" : "s"} excluded</span></footer>
+
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}><DialogContent><DialogHeader><DialogTitle>Import a Venmo statement</DialogTitle><DialogDescription>Upload the CSV exactly as Venmo provides it. Duplicates are ignored automatically.</DialogDescription></DialogHeader><form id="upload-form" className="upload-form" onSubmit={upload}><label className="drop-zone"><Upload/><strong>Choose your Venmo CSV</strong><span>CSV only · up to 8 MB</span><Input ref={fileRef} type="file" accept=".csv,text/csv" required/></label></form><DialogFooter><Button type="submit" form="upload-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Upload/>} Import transactions</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={manualOpen} onOpenChange={setManualOpen}><DialogContent><DialogHeader><DialogTitle>Add a manual ledger entry</DialogTitle><DialogDescription>For purchases, reimbursements or anything that did not arrive through Venmo or a cash count.</DialogDescription></DialogHeader><form id="manual-form" className="form-grid" onSubmit={manual}><div><Label htmlFor="manual-date">Date</Label><Input id="manual-date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required/></div><div><Label htmlFor="manual-amount">Amount</Label><Input id="manual-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="manual-direction">Direction</Label><select className="native-select" id="manual-direction" name="direction"><option value="incoming">Money in</option><option value="outgoing">Money out</option></select></div><div><Label htmlFor="manual-source">Source</Label><select className="native-select" id="manual-source" name="source"><option value="manual">Manual</option><option value="cash">Cash</option></select></div><div><Label htmlFor="manual-person">Person / account</Label><Input id="manual-person" name="counterparty" placeholder="Costco, cash customer…"/></div><div><Label htmlFor="manual-note">Note</Label><Input id="manual-note" name="note" placeholder="What was this for?"/></div></form><DialogFooter><Button type="submit" form="manual-form" disabled={busy}>Add to ledger</Button></DialogFooter></DialogContent></Dialog>
+      <Toaster richColors position="bottom-right"/>
+    </div>
+  );
+}
+
+function Empty({ text }: { text: string }) { return <div className="empty-state"><ReceiptText/><strong>Nothing here yet</strong><span>{text}</span></div>; }
+function Loading() { return <div className="loading-row"><Loader2 className="spin"/> Loading the books…</div>; }
+function History({ title, children }: { title: string; children: React.ReactNode }) { return <article className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">LOG BOOK</span><h2>{title}</h2></div></div><div className="history-list">{children}</div></article>; }

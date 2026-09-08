@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788828306592,
+      "tag": "0000_misty_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788828670532,
+      "tag": "0001_elite_agent_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788830039699,
+      "tag": "0002_flimsy_colleen_wing",
+      "breakpoints": true
+    }
+  ]
+}
