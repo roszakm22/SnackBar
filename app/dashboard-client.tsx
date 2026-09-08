@@ -102,6 +102,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
     return { revenueCents, expenseCents, dailyNetCents, currentBalanceCents, horizons };
   }, [data.ledger, data.openingCardBalanceCents]);
 
+  const outlookChartData = useMemo(() => [
+    { label: "Now", balance: outlook.currentBalanceCents / 100 },
+    ...outlook.horizons.map((projection) => ({ label: `${projection.days} days`, balance: projection.balanceCents / 100 })),
+  ], [outlook]);
+
   const chartData = useMemo(() => {
     const days = new Map<string, { label: string; revenue: number; expenses: number }>();
     [...filtered].reverse().forEach((row) => {
@@ -275,6 +280,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
           <TabsContent value="outlooks" className="section-stack">
             <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue and expenses.</p></div></div>
             <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − expenses</p></div><div className="pace-callout"><span>Current net pace</span><b className={outlook.dailyNetCents >= 0 ? "positive" : "negative"}>{money(outlook.dailyNetCents)}/day</b></div></section>
+            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">PROJECTION PATH</span><h2>Where the balance is headed</h2><p>Current balance plus the recent daily net pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
             {data.ledger.length ? <section className="outlook-grid">{outlook.horizons.map((projection) => <ProjectionCard key={projection.days} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
             <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>28-day expense pace</span><strong>{money(outlook.expenseCents / 4)} / week</strong></div><p>These are straight-line estimates. They update automatically whenever the ledger changes and do not count donations as sales.</p></article>
           </TabsContent>
