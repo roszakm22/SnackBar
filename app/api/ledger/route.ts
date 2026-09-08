@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ function parseMoney(value: unknown) {
 async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Date()) {
   const [lastAudit] = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
   if (!lastAudit) {
-    return { lastAudit: null, ledgerMovementCents: 0, adjustmentCents: 0, expectedBalanceCents: 0, checkedAt };
+    return { lastAudit: null, ledgerMovementCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
   }
   const since = lastAudit.checkedAt;
   const movements = await db
@@ -33,13 +33,20 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
     .select({ amountCents: cardAdjustments.amountCents })
     .from(cardAdjustments)
     .where(gt(cardAdjustments.occurredAt, since));
+  const appliedOutflows = await db
+    .select({ amountCents: transactions.amountCents })
+    .from(cardOutflowApplications)
+    .innerJoin(transactions, eq(cardOutflowApplications.transactionId, transactions.id))
+    .where(gt(cardOutflowApplications.appliedAt, since));
   const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
   const adjustmentCents = adjustments.reduce((sum, row) => sum + row.amountCents, 0);
+  const cardOutflowCents = appliedOutflows.reduce((sum, row) => sum + row.amountCents, 0);
   return {
     lastAudit,
     ledgerMovementCents,
     adjustmentCents,
-    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + adjustmentCents,
+    cardOutflowCents,
+    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + adjustmentCents + cardOutflowCents,
     checkedAt,
   };
 }
@@ -57,6 +64,9 @@ export async function GET() {
     const audits = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(20);
     const [openingAudit] = await db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1);
     const adjustments = await db.select().from(cardAdjustments).orderBy(desc(cardAdjustments.occurredAt)).limit(40);
+    const appliedOutflows = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
+    const appliedOutflowIds = new Set(appliedOutflows.map((row) => row.transactionId));
+    const pendingCardOutflows = rows.filter((row) => row.classification === "snack_bar" && row.amountCents < 0 && !appliedOutflowIds.has(row.id));
     const cardSnapshot = await getCardSnapshot(db);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
@@ -69,11 +79,13 @@ export async function GET() {
         expectedBalanceCents: cardSnapshot.expectedBalanceCents,
         ledgerMovementCents: cardSnapshot.ledgerMovementCents,
         adjustmentCents: cardSnapshot.adjustmentCents,
+        cardOutflowCents: cardSnapshot.cardOutflowCents,
         hasBaseline: Boolean(cardSnapshot.lastAudit),
         lastAudit: cardSnapshot.lastAudit ? { ...cardSnapshot.lastAudit, checkedAt: cardSnapshot.lastAudit.checkedAt.toISOString(), createdAt: cardSnapshot.lastAudit.createdAt.toISOString() } : null,
         history: audits.map((audit) => ({ ...audit, checkedAt: audit.checkedAt.toISOString(), createdAt: audit.createdAt.toISOString() })),
         adjustments: adjustments.map((adjustment) => ({ ...adjustment, occurredAt: adjustment.occurredAt.toISOString(), createdAt: adjustment.createdAt.toISOString() })),
       },
+      pendingCardOutflows: pendingCardOutflows.map(serialize),
     });
   } catch (error) {
     return errorResponse(error);
@@ -208,6 +220,15 @@ export async function POST(request: Request) {
       const now = new Date();
       await db.insert(cardAdjustments).values({ id: crypto.randomUUID(), occurredAt: now, amountCents, note: String(body.note || "Donation / non-sales deposit"), createdAt: now });
       return Response.json({ created: true, amountCents });
+    }
+
+    if (action === "card_outflow_apply") {
+      const transactionId = String(body.transactionId || "");
+      if (!transactionId) return Response.json({ error: "Transaction id is required." }, { status: 400 });
+      const [transaction] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
+      if (!transaction || transaction.classification !== "snack_bar" || transaction.amountCents >= 0) return Response.json({ error: "Choose an approved expense." }, { status: 400 });
+      await db.insert(cardOutflowApplications).values({ id: crypto.randomUUID(), transactionId, appliedAt: new Date(), createdAt: new Date() }).onConflictDoNothing({ target: cardOutflowApplications.transactionId });
+      return Response.json({ applied: true, amountCents: transaction.amountCents });
     }
 
     if (action === "delete") {

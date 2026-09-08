@@ -8,7 +8,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - One-at-a-time classification as snack bar or personal
 - Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
-- Card balance audits against approved Venmo sales and non-sales deposits
+- Card balance audits against approved Venmo sales, posted card expenses, and non-sales deposits
 - Automatic 7-, 30-, and 90-day outlooks based on the latest 28 days of revenue and expenses
 - Starting card funds included in all-time net performance and outlook progress
 - Donations and other card deposits that affect the audit without counting as income

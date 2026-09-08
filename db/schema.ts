@@ -55,6 +55,17 @@ export const cardAdjustments = sqliteTable(
   (table) => [index("idx_card_adjustments_date").on(table.occurredAt)],
 );
 
+export const cardOutflowApplications = sqliteTable(
+  "card_outflow_applications",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id").notNull().references(() => transactions.id),
+    appliedAt: integer("applied_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_card_outflow_transaction").on(table.transactionId), index("idx_card_outflow_applied_at").on(table.appliedAt)],
+);
+
 export const outlookTargets = sqliteTable(
   "outlook_targets",
   {
