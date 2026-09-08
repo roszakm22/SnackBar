@@ -6,7 +6,7 @@ import {
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
   RotateCcw, ShoppingBasket, Target, Trash2, Upload, UserRound, WalletCards,
 } from "lucide-react";
-import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -110,14 +110,18 @@ export default function DashboardClient({ displayName }: { displayName: string }
       if (row.amountCents >= 0) item.revenue += row.amountCents / 100; else item.expenses += Math.abs(row.amountCents) / 100;
       days.set(key, item);
     });
-    let cumulativeRevenue = 0;
-    let cumulativeExpenses = 0;
+    let cumulativeNet = 0;
     return [...days.values()].map((day) => {
-      cumulativeRevenue += day.revenue;
-      cumulativeExpenses += day.expenses;
-      return { label: day.label, revenue: cumulativeRevenue, expenseLine: cumulativeExpenses };
+      cumulativeNet += day.revenue - day.expenses;
+      return { label: day.label, net: cumulativeNet };
     }).slice(-45);
   }, [filtered]);
+
+  const chartZeroOffset = useMemo(() => {
+    const maximum = Math.max(0, ...chartData.map((day) => day.net));
+    const minimum = Math.min(0, ...chartData.map((day) => day.net));
+    return maximum === minimum ? 50 : maximum / (maximum - minimum) * 100;
+  }, [chartData]);
 
   const topPeople = useMemo(() => {
     const totals = new Map<string, { total: number; visits: number }>();
@@ -234,8 +238,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
               <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.incoming)}</strong><ArrowUpRight/></article><article><span>Expenses</span><strong>{money(stats.outgoing)}</strong><ArrowDownRight/></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign/></article></div>
             </section>
             <section className="dashboard-grid">
-              <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">BREAK-EVEN PROGRESS</span><h2>Revenue catching expenses</h2><p>Running revenue compared with the total spent.</p></div></div>
-                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#356859" stopOpacity={.36}/><stop offset="95%" stopColor="#356859" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v, name) => [money(Number(v) * 100), name === "revenue" ? "Revenue" : "Expenses to cover"]}/><Area type="monotone" dataKey="revenue" stroke="#356859" strokeWidth={3} fill="url(#rev)"/><Line type="stepAfter" dataKey="expenseLine" stroke="#b4493e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the break-even chart."/>}
+              <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Growth after expenses</h2><p>Below zero is spending that sales have not recovered. Above zero is actual growth.</p></div></div>
+                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v) => [money(Number(v) * 100), Number(v) >= 0 ? "Growth after expenses" : "Unrecovered spending"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the growth chart."/>}
               </article>
               <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
               <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>

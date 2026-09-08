@@ -6,7 +6,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 
 - Money-in-only Venmo CSV imports with automatic duplicate detection
 - One-at-a-time classification as snack bar or personal
-- Approved revenue, expenses, net performance, and customer totals
+- Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
 - Card balance audits against approved Venmo sales and non-sales deposits
 - Automatic 7-, 30-, and 90-day outlooks based on the latest 28 days of revenue and expenses

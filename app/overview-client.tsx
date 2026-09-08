@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Loader2, LockKeyhole, ReceiptText, ShoppingBasket, Trophy } from "lucide-react";
-import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
@@ -71,18 +71,21 @@ export default function OverviewClient() {
   }, [data.openingCardBalanceCents, filtered, period]);
 
   const chartData = useMemo(() => {
-    let cumulativeRevenue = 0;
-    let cumulativeExpenses = 0;
+    let cumulativeNet = 0;
     return filtered.map((day) => {
-      cumulativeRevenue += day.revenueCents / 100;
-      cumulativeExpenses += day.expenseCents / 100;
+      cumulativeNet += (day.revenueCents - day.expenseCents) / 100;
       return {
         label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(localDate(day.date)),
-        revenue: cumulativeRevenue,
-        expenseLine: cumulativeExpenses,
+        net: cumulativeNet,
       };
     }).slice(-45);
   }, [filtered]);
+
+  const chartZeroOffset = useMemo(() => {
+    const maximum = Math.max(0, ...chartData.map((day) => day.net));
+    const minimum = Math.min(0, ...chartData.map((day) => day.net));
+    return maximum === minimum ? 50 : maximum / (maximum - minimum) * 100;
+  }, [chartData]);
 
   const weeklyComparison = useMemo(() => {
     const currentWeekStart = new Date();
@@ -120,8 +123,8 @@ export default function OverviewClient() {
           <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.revenue)}</strong><ArrowUpRight /></article><article><span>Expenses</span><strong>{money(stats.expenses)}</strong><ArrowDownRight /></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign /></article></div>
         </section>
         <section className="dashboard-grid">
-          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">BREAK-EVEN PROGRESS</span><h2>Revenue catching expenses</h2><p>Running revenue compared with the total spent.</p></div></div>
-            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#356859" stopOpacity={.36}/><stop offset="95%" stopColor="#356859" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value, name) => [money(Number(value) * 100), name === "revenue" ? "Revenue" : "Expenses to cover"]}/><Area type="monotone" dataKey="revenue" stroke="#356859" strokeWidth={3} fill="url(#public-rev)"/><Line type="stepAfter" dataKey="expenseLine" stroke="#b4493e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
+          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Growth after expenses</h2><p>Below zero is spending that sales have not recovered. Above zero is actual growth.</p></div></div>
+            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => [money(Number(value) * 100), Number(value) >= 0 ? "Growth after expenses" : "Unrecovered spending"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#public-net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
           <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><span className="rank">{index + 1}</span><div><strong>{leader.name}</strong><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
           <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestCardAuditAt ? `Card was last audited ${dateTime(data.latestCardAuditAt)}.` : "The card has not been audited yet."}</p></article>
