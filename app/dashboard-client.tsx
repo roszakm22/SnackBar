@@ -125,7 +125,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
   const topPeople = useMemo(() => {
     const totals = new Map<string, { total: number; visits: number }>();
-    filtered.filter((x) => x.amountCents > 0 && x.counterparty).forEach((x) => {
+    filtered.filter((x) => x.source !== "cash" && x.amountCents > 0 && x.counterparty).forEach((x) => {
       const current = totals.get(x.counterparty) || { total: 0, visits: 0 };
       current.total += x.amountCents; current.visits += 1; totals.set(x.counterparty, current);
     });

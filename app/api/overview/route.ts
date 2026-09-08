@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const from = fromValue && /^\d{4}-\d{2}-\d{2}$/.test(fromValue) ? new Date(`${fromValue}T00:00:00Z`) : new Date(0);
     const to = toValue && /^\d{4}-\d{2}-\d{2}$/.test(toValue) ? new Date(`${toValue}T23:59:59.999Z`) : new Date();
     const leaders = new Map<string, { name: string; totalCents: number; purchases: number }>();
-    rows.filter((row) => row.amountCents > 0 && row.counterparty && row.occurredAt >= from && row.occurredAt <= to).forEach((row) => {
+    rows.filter((row) => row.source !== "cash" && row.amountCents > 0 && row.counterparty && row.occurredAt >= from && row.occurredAt <= to).forEach((row) => {
       const current = leaders.get(row.counterparty) || { name: row.counterparty, totalCents: 0, purchases: 0 };
       current.totalCents += row.amountCents;
       current.purchases += 1;
