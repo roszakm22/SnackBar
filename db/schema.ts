@@ -43,6 +43,18 @@ export const cardAudits = sqliteTable(
   (table) => [index("idx_card_audits_date").on(table.checkedAt)],
 );
 
+export const cardAdjustments = sqliteTable(
+  "card_adjustments",
+  {
+    id: text("id").primaryKey(),
+    occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_card_adjustments_date").on(table.occurredAt)],
+);
+
 export const transactions = sqliteTable(
   "transactions",
   {

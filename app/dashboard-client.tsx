@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, Banknote, BarChart3, CalendarDays, Check,
-  CircleDollarSign, ClipboardCheck, CreditCard, Loader2, Plus, ReceiptText,
+  CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
   RotateCcw, ShoppingBasket, Trash2, Upload, UserRound, WalletCards,
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -24,12 +24,13 @@ type Transaction = {
 type Batch = { id: string; fileName: string; importedCount: number; duplicateCount: number; skippedCount: number; createdAt: string };
 type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; calculatedChangeCents: number; note: string };
 type CardAudit = { id: string; checkedAt: string; actualBalanceCents: number; expectedBalanceCents: number; varianceCents: number; ledgerMovementCents: number };
+type CardAdjustment = { id: string; occurredAt: string; amountCents: number; note: string };
 type LedgerData = {
   pending: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
-  cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; lastAudit: CardAudit | null; history: CardAudit[] };
+  cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; adjustmentCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[] };
 };
 
-const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, lastAudit: null, history: [] } };
+const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
@@ -49,6 +50,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [uploadOpen, setUploadOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
+  const [cardDepositOpen, setCardDepositOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -125,8 +127,16 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
   const cardAudit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
-    const result = await post({ action: "card_audit", balance: form.get("balance") }, "Card audit saved.");
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const resetBaseline = submitter?.value === "baseline";
+    const result = await post({ action: resetBaseline ? "card_baseline" : "card_audit", balance: form.get("balance") }, resetBaseline ? "New card baseline saved." : "Card audit saved.");
     if (result) event.currentTarget.reset();
+  };
+
+  const cardDeposit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "card_adjustment", amount: form.get("amount"), note: form.get("note") }, "Non-sales deposit added to the card balance.");
+    if (result) { setCardDepositOpen(false); event.currentTarget.reset(); }
   };
 
   const review = async (classification: "snack_bar" | "personal") => {
@@ -192,9 +202,10 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </TabsContent>
 
           <TabsContent value="card" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">RECONCILIATION</span><h2>Card audit</h2><p>Enter what the card actually holds and compare it with approved Venmo activity.</p></div></div>
-            <section className="audit-grid"><article className="audit-form-card"><div className="expected-chip"><span>Ledger expects</span><strong>{money(data.cardAudit.expectedBalanceCents)}</strong></div><form onSubmit={cardAudit}><Label htmlFor="card-balance">What is the current card balance?</Label><div className="money-input"><span>$</span><Input id="card-balance" name="balance" inputMode="decimal" placeholder="0.00" required autoComplete="off"/></div><Button size="lg" disabled={busy}>{busy ? <Loader2 className="spin"/> : <ClipboardCheck/>} Run the audit</Button></form><p className="method-note">The first check compares against an opening balance of $0. After that, expected balance starts from the last actual balance plus approved Venmo movement.</p></article><article className={`audit-result ${varianceClass}`}><span className="eyebrow light">LATEST RESULT</span>{latestAudit ? <><div className="audit-status">{latestAudit.varianceCents === 0 ? "BALANCED" : latestAudit.varianceCents < 0 ? "SHORT" : "OVER"}</div><strong>{money(Math.abs(latestAudit.varianceCents))}</strong><div className="audit-pair"><span>Actual <b>{money(latestAudit.actualBalanceCents)}</b></span><span>Expected <b>{money(latestAudit.expectedBalanceCents)}</b></span></div><p>{dateTime(latestAudit.checkedAt)}</p></> : <><WalletCards/><h3>No audit yet</h3><p>Enter the current balance to create a baseline.</p></>}</article></section>
+            <div className="page-heading"><div><span className="eyebrow">RECONCILIATION</span><h2>Card audit</h2><p>Compare the current card balance with Venmo sales and non-sales deposits since the last check.</p></div><Button variant="outline" onClick={() => setCardDepositOpen(true)}><HandCoins/> Add non-sales deposit</Button></div>
+            <section className="audit-grid"><article className="audit-form-card"><div className="expected-chip"><span>{data.cardAudit.hasBaseline ? "Expected balance" : "First audit"}</span><strong>{data.cardAudit.hasBaseline ? money(data.cardAudit.expectedBalanceCents) : "Sets baseline"}</strong></div>{data.cardAudit.hasBaseline && <div className="audit-breakdown"><span>Since last audit</span><b>Venmo sales {money(data.cardAudit.ledgerMovementCents)}</b><b>Non-sales deposits {money(data.cardAudit.adjustmentCents)}</b></div>}<form onSubmit={cardAudit}><Label htmlFor="card-balance">What is the current card balance?</Label><div className="money-input"><span>$</span><Input id="card-balance" name="balance" inputMode="decimal" placeholder="0.00" required autoComplete="off"/></div><Button size="lg" disabled={busy}>{busy ? <Loader2 className="spin"/> : <ClipboardCheck/>} {data.cardAudit.hasBaseline ? "Run the audit" : "Set starting balance"}</Button>{data.cardAudit.hasBaseline && <Button type="submit" name="mode" value="baseline" variant="ghost" disabled={busy}>Use this as a new baseline</Button>}</form><p className="method-note">Your first entry becomes the starting balance and always balances. Future audits start from the last actual balance, then add approved Venmo sales and recorded non-sales deposits.</p></article><article className={`audit-result ${varianceClass}`}><span className="eyebrow light">LATEST RESULT</span>{latestAudit ? <><div className="audit-status">{latestAudit.varianceCents === 0 ? "BALANCED" : latestAudit.varianceCents < 0 ? "SHORT" : "OVER"}</div><strong>{money(Math.abs(latestAudit.varianceCents))}</strong><div className="audit-pair"><span>Actual <b>{money(latestAudit.actualBalanceCents)}</b></span><span>Expected <b>{money(latestAudit.expectedBalanceCents)}</b></span></div><p>{dateTime(latestAudit.checkedAt)}</p></> : <><WalletCards/><h3>No baseline yet</h3><p>Enter the current balance once to start tracking.</p></>}</article></section>
             <History title="Audit history">{data.cardAudit.history.length ? data.cardAudit.history.map((audit) => <div className="history-row audit-history" key={audit.id}><div className={`status-dot ${audit.varianceCents === 0 ? "even" : audit.varianceCents < 0 ? "short" : "over"}`}/><div><strong>{dateTime(audit.checkedAt)}</strong><span>Expected {money(audit.expectedBalanceCents)} · actual {money(audit.actualBalanceCents)}</span></div><b>{audit.varianceCents === 0 ? "Balanced" : `${audit.varianceCents > 0 ? "+" : "−"}${money(Math.abs(audit.varianceCents))}`}</b></div>) : <Empty text="Completed card audits will appear here."/>}</History>
+            {data.cardAudit.adjustments.length > 0 && <History title="Non-sales deposits">{data.cardAudit.adjustments.map((adjustment) => <div className="history-row" key={adjustment.id}><div className="history-icon"><HandCoins/></div><div><strong>{adjustment.note || "Non-sales deposit"}</strong><span>{dateTime(adjustment.occurredAt)} · excluded from income</span></div><b>{money(adjustment.amountCents)}</b></div>)}</History>}
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
@@ -207,7 +218,9 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
       <footer><span>SNACK BAR · DET 930</span><span>{data.personalCount} personal transaction{data.personalCount === 1 ? "" : "s"} excluded</span></footer>
 
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}><DialogContent><DialogHeader><DialogTitle>Import a Venmo statement</DialogTitle><DialogDescription>Upload the CSV exactly as Venmo provides it. Duplicates are ignored automatically.</DialogDescription></DialogHeader><form id="upload-form" className="upload-form" onSubmit={upload}><label className="drop-zone"><Upload/><strong>Choose your Venmo CSV</strong><span>CSV only · up to 8 MB</span><Input ref={fileRef} type="file" accept=".csv,text/csv" required/></label></form><DialogFooter><Button type="submit" form="upload-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Upload/>} Import transactions</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}><DialogContent><DialogHeader><DialogTitle>Import a Venmo statement</DialogTitle><DialogDescription>Upload the CSV exactly as Venmo provides it. Only money received is imported; outgoing payments and duplicates are ignored.</DialogDescription></DialogHeader><form id="upload-form" className="upload-form" onSubmit={upload}><label className="drop-zone"><Upload/><strong>Choose your Venmo CSV</strong><span>CSV only · up to 8 MB</span><Input ref={fileRef} type="file" accept=".csv,text/csv" required/></label></form><DialogFooter><Button type="submit" form="upload-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Upload/>} Import transactions</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={cardDepositOpen} onOpenChange={setCardDepositOpen}><DialogContent><DialogHeader><DialogTitle>Add a non-sales deposit</DialogTitle><DialogDescription>Use this for donated money or other funds added to the card. It raises the expected card balance without counting as snack bar income.</DialogDescription></DialogHeader><form id="card-deposit-form" className="form-grid" onSubmit={cardDeposit}><div><Label htmlFor="card-deposit-amount">Amount</Label><Input id="card-deposit-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="card-deposit-note">Description</Label><Input id="card-deposit-note" name="note" placeholder="Donation, starting funds…"/></div></form><DialogFooter><Button type="submit" form="card-deposit-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <HandCoins/>} Add deposit</Button></DialogFooter></DialogContent></Dialog>
 
       <Dialog open={manualOpen} onOpenChange={setManualOpen}><DialogContent><DialogHeader><DialogTitle>Add a manual ledger entry</DialogTitle><DialogDescription>For purchases, reimbursements or anything that did not arrive through Venmo or a cash count.</DialogDescription></DialogHeader><form id="manual-form" className="form-grid" onSubmit={manual}><div><Label htmlFor="manual-date">Date</Label><Input id="manual-date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required/></div><div><Label htmlFor="manual-amount">Amount</Label><Input id="manual-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="manual-direction">Direction</Label><select className="native-select" id="manual-direction" name="direction"><option value="incoming">Money in</option><option value="outgoing">Money out</option></select></div><div><Label htmlFor="manual-source">Source</Label><select className="native-select" id="manual-source" name="source"><option value="manual">Manual</option><option value="cash">Cash</option></select></div><div><Label htmlFor="manual-person">Person / account</Label><Input id="manual-person" name="counterparty" placeholder="Costco, cash customer…"/></div><div><Label htmlFor="manual-note">Note</Label><Input id="manual-note" name="note" placeholder="What was this for?"/></div></form><DialogFooter><Button type="submit" form="manual-form" disabled={busy}>Add to ledger</Button></DialogFooter></DialogContent></Dialog>
       <Toaster richColors position="bottom-right"/>

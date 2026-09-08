@@ -78,6 +78,7 @@ export function parseVenmoCsv(input: string) {
     const amountCents = amountToCents(row[indexes.amount] || "");
     if (!date || amountCents === null || amountCents === 0) { if (row.some(Boolean)) skipped += 1; continue; }
     const direction = amountCents > 0 ? "incoming" : "outgoing";
+    if (direction === "outgoing") { skipped += 1; continue; }
     const counterparty = (direction === "incoming" ? row[indexes.from] : row[indexes.to]) || "Unknown";
     const note = row[indexes.note] || "";
     const originalType = row[indexes.type] || "";

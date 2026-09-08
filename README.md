@@ -4,11 +4,12 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 
 ## What it tracks
 
-- Venmo CSV imports with automatic duplicate detection
+- Money-in-only Venmo CSV imports with automatic duplicate detection
 - One-at-a-time classification as snack bar or personal
 - Approved revenue, expenses, net performance, and customer totals
 - Cash-box counts, deposits, and withdrawals
-- Card balance audits against approved Venmo activity
+- Card balance audits against approved Venmo sales and non-sales deposits
+- Donations and other card deposits that affect the audit without counting as income
 - Manual ledger entries
 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.

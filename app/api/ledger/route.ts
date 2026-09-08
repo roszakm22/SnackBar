@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAudits, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -21,16 +21,25 @@ function parseMoney(value: unknown) {
 
 async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Date()) {
   const [lastAudit] = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
-  const since = lastAudit?.checkedAt ?? new Date(0);
+  if (!lastAudit) {
+    return { lastAudit: null, ledgerMovementCents: 0, adjustmentCents: 0, expectedBalanceCents: 0, checkedAt };
+  }
+  const since = lastAudit.checkedAt;
   const movements = await db
     .select({ amountCents: transactions.amountCents })
     .from(transactions)
-    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), gt(transactions.occurredAt, since)));
+    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"), gt(transactions.occurredAt, since)));
+  const adjustments = await db
+    .select({ amountCents: cardAdjustments.amountCents })
+    .from(cardAdjustments)
+    .where(gt(cardAdjustments.occurredAt, since));
   const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
+  const adjustmentCents = adjustments.reduce((sum, row) => sum + row.amountCents, 0);
   return {
     lastAudit,
     ledgerMovementCents,
-    expectedBalanceCents: (lastAudit?.actualBalanceCents ?? 0) + ledgerMovementCents,
+    adjustmentCents,
+    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + adjustmentCents,
     checkedAt,
   };
 }
@@ -38,6 +47,7 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
 export async function GET() {
   try {
     const db = getDb();
+    await db.delete(transactions).where(and(eq(transactions.source, "venmo"), eq(transactions.direction, "outgoing")));
     const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
@@ -45,6 +55,7 @@ export async function GET() {
     const [{ count: personalCount }] = await db.select({ count: sql<number>`count(*)` }).from(excludedKeys);
     const cashEvents = await db.select().from(cashBoxEvents).orderBy(desc(cashBoxEvents.occurredAt)).limit(60);
     const audits = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(20);
+    const adjustments = await db.select().from(cardAdjustments).orderBy(desc(cardAdjustments.occurredAt)).limit(40);
     const cardSnapshot = await getCardSnapshot(db);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
@@ -55,8 +66,11 @@ export async function GET() {
       cardAudit: {
         expectedBalanceCents: cardSnapshot.expectedBalanceCents,
         ledgerMovementCents: cardSnapshot.ledgerMovementCents,
+        adjustmentCents: cardSnapshot.adjustmentCents,
+        hasBaseline: Boolean(cardSnapshot.lastAudit),
         lastAudit: cardSnapshot.lastAudit ? { ...cardSnapshot.lastAudit, checkedAt: cardSnapshot.lastAudit.checkedAt.toISOString(), createdAt: cardSnapshot.lastAudit.createdAt.toISOString() } : null,
         history: audits.map((audit) => ({ ...audit, checkedAt: audit.checkedAt.toISOString(), createdAt: audit.createdAt.toISOString() })),
+        adjustments: adjustments.map((adjustment) => ({ ...adjustment, occurredAt: adjustment.occurredAt.toISOString(), createdAt: adjustment.createdAt.toISOString() })),
       },
     });
   } catch (error) {
@@ -174,14 +188,24 @@ export async function POST(request: Request) {
       return Response.json({ created: true });
     }
 
-    if (action === "card_audit") {
+    if (action === "card_audit" || action === "card_baseline") {
       const actualBalanceCents = parseMoney(body.balance);
       if (actualBalanceCents === null || actualBalanceCents < 0) return Response.json({ error: "Enter the current card balance." }, { status: 400 });
       const now = new Date();
       const snapshot = await getCardSnapshot(db, now);
-      const varianceCents = actualBalanceCents - snapshot.expectedBalanceCents;
-      await db.insert(cardAudits).values({ id: crypto.randomUUID(), checkedAt: now, actualBalanceCents, expectedBalanceCents: snapshot.expectedBalanceCents, varianceCents, ledgerMovementCents: snapshot.ledgerMovementCents, createdAt: now });
-      return Response.json({ actualBalanceCents, expectedBalanceCents: snapshot.expectedBalanceCents, varianceCents, ledgerMovementCents: snapshot.ledgerMovementCents });
+      const resetBaseline = action === "card_baseline" || !snapshot.lastAudit;
+      const expectedBalanceCents = resetBaseline ? actualBalanceCents : snapshot.expectedBalanceCents;
+      const varianceCents = actualBalanceCents - expectedBalanceCents;
+      await db.insert(cardAudits).values({ id: crypto.randomUUID(), checkedAt: now, actualBalanceCents, expectedBalanceCents, varianceCents, ledgerMovementCents: resetBaseline ? 0 : snapshot.ledgerMovementCents, createdAt: now });
+      return Response.json({ actualBalanceCents, expectedBalanceCents, varianceCents, ledgerMovementCents: snapshot.ledgerMovementCents });
+    }
+
+    if (action === "card_adjustment") {
+      const amountCents = parseMoney(body.amount);
+      if (amountCents === null || amountCents <= 0) return Response.json({ error: "Enter a deposit amount greater than zero." }, { status: 400 });
+      const now = new Date();
+      await db.insert(cardAdjustments).values({ id: crypto.randomUUID(), occurredAt: now, amountCents, note: String(body.note || "Donation / non-sales deposit"), createdAt: now });
+      return Response.json({ created: true, amountCents });
     }
 
     if (action === "delete") {
