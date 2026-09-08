@@ -6,7 +6,7 @@ import {
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
   RotateCcw, ShoppingBasket, Trash2, Upload, UserRound, WalletCards,
 } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +100,29 @@ export default function DashboardClient({ displayName }: { displayName: string }
     return [...totals.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
   }, [filtered]);
 
+  const weeklyComparison = useMemo(() => {
+    const currentWeekStart = new Date();
+    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay());
+    const weeks = Array.from({ length: 4 }, (_, index) => {
+      const start = new Date(currentWeekStart);
+      start.setDate(start.getDate() - (3 - index) * 7);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      const lastDay = new Date(end);
+      lastDay.setDate(lastDay.getDate() - 1);
+      const format = (date: Date) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+      return { key: `week${index}`, start, end, label: `${format(start)}–${format(lastDay)}` };
+    });
+    const rows: Array<Record<string, string | number>> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => ({ day, week0: 0, week1: 0, week2: 0, week3: 0 }));
+    data.ledger.filter((row) => row.amountCents > 0).forEach((row) => {
+      const date = new Date(row.occurredAt);
+      const week = weeks.find((item) => date >= item.start && date < item.end);
+      if (week) rows[date.getDay()][week.key] = Number(rows[date.getDay()][week.key]) + row.amountCents / 100;
+    });
+    return { weeks, rows, hasData: rows.some((row) => weeks.some((week) => Number(row[week.key]) > 0)) };
+  }, [data.ledger]);
+
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const file = fileRef.current?.files?.[0];
     if (!file) return toast.error("Choose a Venmo CSV first.");
@@ -187,6 +210,9 @@ export default function DashboardClient({ displayName }: { displayName: string }
               </article>
               <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
               <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>
+              <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Daily revenue aligned Sunday through Saturday.</p></div></div>
+                {weeklyComparison.hasData ? <div className="comparison-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={weeklyComparison.rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="day" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Legend/>{weeklyComparison.weeks.map((week, index) => <Line key={week.key} type="monotone" dataKey={week.key} name={week.label} stroke={["#9aaea6", "#627a99", "#d58850", "#356859"][index]} strokeWidth={index === 3 ? 3 : 2} dot={{ r: index === 3 ? 4 : 3 }} activeDot={{ r: 5 }} />)}</LineChart></ResponsiveContainer></div> : <Empty text="Revenue from the last four weeks will appear here."/>}
+              </article>
             </section>
           </TabsContent>
 
