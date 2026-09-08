@@ -17,11 +17,11 @@ Personal transactions are removed after classification. Only an irreversible sou
 
 This is a Vinext Cloudflare Worker with a D1 database.
 
-1. Create a D1 database named `snackbar-ledger` in Cloudflare.
-2. Add `CLOUDFLARE_D1_DATABASE_ID` as a build environment variable using that database's ID.
-3. Connect this GitHub repository to a Cloudflare Workers Builds project.
-4. Use `npm run deploy` as the deploy command. It builds the Worker, applies the checked-in D1 migrations, and deploys the app.
-5. Protect the Worker with Cloudflare Access before importing financial data.
+1. Connect this GitHub repository to a Cloudflare Workers Builds project.
+2. Use `npm run deploy` as the deploy command. It builds the Worker, applies the checked-in D1 migrations, and deploys the app.
+3. Protect the Worker with Cloudflare Access before importing financial data.
+
+The production D1 database is already configured as `snackbar-ledger` with the `DB` binding.
 
 For local development, run `npm ci` followed by `npm run dev`. The local Worker uses a project-local D1 database.
 

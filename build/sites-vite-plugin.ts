@@ -26,6 +26,12 @@ export function sites(): Plugin {
     },
     async closeBundle() {
       const outputDirectory = resolve(root, "dist", ".openai");
+      const workerMigrationsDirectory = resolve(
+        root,
+        "dist",
+        "server",
+        "migrations",
+      );
       const hostingConfig = resolve(root, ".openai", "hosting.json");
       const drizzleSource = resolve(root, "drizzle");
 
@@ -39,6 +45,9 @@ export function sites(): Plugin {
         await cp(drizzleSource, resolve(outputDirectory, "drizzle"), {
           recursive: true,
         });
+        await rm(workerMigrationsDirectory, { recursive: true, force: true });
+        await mkdir(workerMigrationsDirectory, { recursive: true });
+        await cp(drizzleSource, workerMigrationsDirectory, { recursive: true });
       }
     },
   };

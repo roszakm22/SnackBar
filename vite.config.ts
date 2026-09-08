@@ -3,8 +3,8 @@ import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
-const LOCAL_D1_PLACEHOLDER_DATABASE_ID =
-  "00000000-0000-4000-8000-000000000000";
+const SNACKBAR_D1_DATABASE_ID =
+  "d78df390-4669-413b-9552-0aa03a7419fe";
 
 const { d1, r2 } = hostingConfig;
 
@@ -19,9 +19,7 @@ const localBindingConfig = {
         {
           binding: d1,
           database_name: "snackbar-ledger",
-          database_id:
-            process.env.CLOUDFLARE_D1_DATABASE_ID ||
-            LOCAL_D1_PLACEHOLDER_DATABASE_ID,
+          database_id: SNACKBAR_D1_DATABASE_ID,
         },
       ]
     : [],
