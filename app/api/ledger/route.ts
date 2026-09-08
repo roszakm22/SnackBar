@@ -1,6 +1,6 @@
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cashBoxEvents, excludedKeys, importBatches, outlookTargets, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +55,9 @@ export async function GET() {
     const [{ count: personalCount }] = await db.select({ count: sql<number>`count(*)` }).from(excludedKeys);
     const cashEvents = await db.select().from(cashBoxEvents).orderBy(desc(cashBoxEvents.occurredAt)).limit(60);
     const audits = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(20);
+    const [openingAudit] = await db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1);
     const adjustments = await db.select().from(cardAdjustments).orderBy(desc(cardAdjustments.occurredAt)).limit(40);
+    const outlooks = await db.select().from(outlookTargets).orderBy(asc(outlookTargets.targetDate));
     const cardSnapshot = await getCardSnapshot(db);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
@@ -63,6 +65,8 @@ export async function GET() {
       personalCount,
       batches: batches.map((batch) => ({ ...batch, createdAt: batch.createdAt.toISOString() })),
       cashEvents: cashEvents.map((event) => ({ ...event, occurredAt: event.occurredAt.toISOString(), createdAt: event.createdAt.toISOString() })),
+      openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
+      outlooks: outlooks.map((target) => ({ ...target, createdAt: target.createdAt.toISOString() })),
       cardAudit: {
         expectedBalanceCents: cardSnapshot.expectedBalanceCents,
         ledgerMovementCents: cardSnapshot.ledgerMovementCents,
@@ -206,6 +210,25 @@ export async function POST(request: Request) {
       const now = new Date();
       await db.insert(cardAdjustments).values({ id: crypto.randomUUID(), occurredAt: now, amountCents, note: String(body.note || "Donation / non-sales deposit"), createdAt: now });
       return Response.json({ created: true, amountCents });
+    }
+
+    if (action === "outlook_create") {
+      const targetCents = parseMoney(body.amount);
+      const targetDate = String(body.date || "");
+      const label = String(body.label || "").trim().slice(0, 80);
+      const parsedDate = new Date(`${targetDate}T12:00:00Z`);
+      if (targetCents === null || targetCents <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate) || Number.isNaN(parsedDate.getTime())) {
+        return Response.json({ error: "Enter a valid target date and amount." }, { status: 400 });
+      }
+      await db.insert(outlookTargets).values({ id: crypto.randomUUID(), targetDate, targetCents, label, createdAt: new Date() });
+      return Response.json({ created: true });
+    }
+
+    if (action === "outlook_delete") {
+      const id = String(body.id || "");
+      if (!id) return Response.json({ error: "Target id is required." }, { status: 400 });
+      await db.delete(outlookTargets).where(eq(outlookTargets.id, id));
+      return Response.json({ deleted: true });
     }
 
     if (action === "delete") {

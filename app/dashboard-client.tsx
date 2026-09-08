@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, Banknote, BarChart3, CalendarDays, Check,
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
-  RotateCcw, ShoppingBasket, Trash2, Upload, UserRound, WalletCards,
+  RotateCcw, ShoppingBasket, Target, Trash2, Upload, UserRound, WalletCards,
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -25,12 +25,14 @@ type Batch = { id: string; fileName: string; importedCount: number; duplicateCou
 type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; calculatedChangeCents: number; note: string };
 type CardAudit = { id: string; checkedAt: string; actualBalanceCents: number; expectedBalanceCents: number; varianceCents: number; ledgerMovementCents: number };
 type CardAdjustment = { id: string; occurredAt: string; amountCents: number; note: string };
+type OutlookTarget = { id: string; targetDate: string; targetCents: number; label: string; createdAt: string };
 type LedgerData = {
   pending: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
+  openingCardBalanceCents: number; outlooks: OutlookTarget[];
   cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; adjustmentCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[] };
 };
 
-const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
+const emptyData: LedgerData = { pending: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, outlooks: [], cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
@@ -51,6 +53,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [manualOpen, setManualOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
   const [cardDepositOpen, setCardDepositOpen] = useState(false);
+  const [targetOpen, setTargetOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -77,8 +80,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
     const incoming = filtered.filter((x) => x.amountCents > 0).reduce((sum, x) => sum + x.amountCents, 0);
     const outgoing = filtered.filter((x) => x.amountCents < 0).reduce((sum, x) => sum + Math.abs(x.amountCents), 0);
     const sales = filtered.filter((x) => x.amountCents > 0);
-    return { incoming, outgoing, net: incoming - outgoing, average: sales.length ? incoming / sales.length : 0 };
-  }, [filtered]);
+    const starting = period === "all" ? data.openingCardBalanceCents : 0;
+    return { incoming, outgoing, starting, net: starting + incoming - outgoing, average: sales.length ? incoming / sales.length : 0 };
+  }, [data.openingCardBalanceCents, filtered, period]);
+
+  const outlookBalance = useMemo(() => data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0), [data.ledger, data.openingCardBalanceCents]);
 
   const chartData = useMemo(() => {
     const days = new Map<string, { label: string; revenue: number; expenses: number; net: number }>();
@@ -162,6 +168,17 @@ export default function DashboardClient({ displayName }: { displayName: string }
     if (result) { setCardDepositOpen(false); event.currentTarget.reset(); }
   };
 
+  const createTarget = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    const result = await post({ action: "outlook_create", date: form.get("date"), amount: form.get("amount"), label: form.get("label") }, "Outlook target added.");
+    if (result) { setTargetOpen(false); event.currentTarget.reset(); }
+  };
+
+  const removeTarget = async (id: string) => {
+    if (!window.confirm("Delete this outlook target?")) return;
+    await post({ action: "outlook_delete", id }, "Outlook target deleted.");
+  };
+
   const review = async (classification: "snack_bar" | "personal") => {
     const current = data.pending[0]; if (!current) return;
     await post({ action: "review", ids: [current.id], classification }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
@@ -194,6 +211,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
               <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length}</span></TabsTrigger>
               <TabsTrigger value="cash"><Banknote/> Cash box</TabsTrigger>
               <TabsTrigger value="card"><CreditCard/> Card audit</TabsTrigger>
+              <TabsTrigger value="outlooks"><Target/> Outlooks</TabsTrigger>
               <TabsTrigger value="ledger"><ReceiptText/> Ledger</TabsTrigger>
             </TabsList>
             <label className="period-control">View <select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label>
@@ -201,7 +219,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
           <TabsContent value="overview" className="section-stack">
             <section className="hero-grid">
-              <article className="net-card"><span className="eyebrow light">Net performance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{filtered.length} approved entries in this view</p><div className="net-stripe"><span>Revenue {money(stats.incoming)}</span><span>Expenses {money(stats.outgoing)}</span></div></article>
+              <article className="net-card"><span className="eyebrow light">Net performance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{filtered.length} approved entries in this view</p><div className="net-stripe">{stats.starting > 0 && <span>Starting card {money(stats.starting)}</span>}<span>Revenue {money(stats.incoming)}</span><span>Expenses {money(stats.outgoing)}</span></div></article>
               <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.incoming)}</strong><ArrowUpRight/></article><article><span>Expenses</span><strong>{money(stats.outgoing)}</strong><ArrowDownRight/></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign/></article></div>
             </section>
             <section className="dashboard-grid">
@@ -234,6 +252,12 @@ export default function DashboardClient({ displayName }: { displayName: string }
             {data.cardAudit.adjustments.length > 0 && <History title="Non-sales deposits">{data.cardAudit.adjustments.map((adjustment) => <div className="history-row" key={adjustment.id}><div className="history-icon"><HandCoins/></div><div><strong>{adjustment.note || "Non-sales deposit"}</strong><span>{dateTime(adjustment.occurredAt)} · excluded from income</span></div><b>{money(adjustment.amountCents)}</b></div>)}</History>}
           </TabsContent>
 
+          <TabsContent value="outlooks" className="section-stack">
+            <div className="page-heading"><div><span className="eyebrow">MONEY TARGETS</span><h2>Outlooks</h2><p>Set the balance the snack bar should reach by a certain date and see the pace required to get there.</p></div><Button onClick={() => setTargetOpen(true)}><Plus/> Add target</Button></div>
+            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT TRACKED BALANCE</span><strong>{money(outlookBalance)}</strong><p>Starting card funds + approved income − expenses</p></div><Target/></section>
+            {data.outlooks.length ? <section className="outlook-grid">{data.outlooks.map((target) => <OutlookCard key={target.id} target={target} currentCents={outlookBalance} onDelete={() => void removeTarget(target.id)}/>)}</section> : <article className="panel"><Empty text="Add a dated money target to start the outlook."/></article>}
+          </TabsContent>
+
           <TabsContent value="ledger" className="section-stack">
             <div className="page-heading"><div><span className="eyebrow">APPROVED ACTIVITY</span><h2>The ledger</h2><p>Venmo, cash counts and manual entries in one record.</p></div><Button onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button></div>
             <article className="panel table-panel">{loading ? <Loading/> : filtered.length ? <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Source</TableHead><TableHead>Person / account</TableHead><TableHead>Note</TableHead><TableHead className="amount-head">Amount</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell>{shortDate(row.occurredAt)}</TableCell><TableCell><Badge variant="outline">{row.source}</Badge></TableCell><TableCell>{row.counterparty || "—"}</TableCell><TableCell className="note-cell">{row.note || "—"}</TableCell><TableCell className={`amount-cell ${row.amountCents >= 0 ? "positive" : "negative"}`}>{money(row.amountCents)}</TableCell><TableCell><Button variant="ghost" size="icon-sm" aria-label="Delete transaction" onClick={() => void remove(row.id)}><Trash2/></Button></TableCell></TableRow>)}</TableBody></Table> : <Empty text="No approved entries in this period."/>}</article>
@@ -248,6 +272,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
       <Dialog open={cardDepositOpen} onOpenChange={setCardDepositOpen}><DialogContent><DialogHeader><DialogTitle>Add a non-sales deposit</DialogTitle><DialogDescription>Use this for donated money or other funds added to the card. It raises the expected card balance without counting as snack bar income.</DialogDescription></DialogHeader><form id="card-deposit-form" className="form-grid" onSubmit={cardDeposit}><div><Label htmlFor="card-deposit-amount">Amount</Label><Input id="card-deposit-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="card-deposit-note">Description</Label><Input id="card-deposit-note" name="note" placeholder="Donation, starting funds…"/></div></form><DialogFooter><Button type="submit" form="card-deposit-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <HandCoins/>} Add deposit</Button></DialogFooter></DialogContent></Dialog>
 
+      <Dialog open={targetOpen} onOpenChange={setTargetOpen}><DialogContent><DialogHeader><DialogTitle>Add an outlook target</DialogTitle><DialogDescription>Choose a date and the total tracked balance the snack bar should have reached by then.</DialogDescription></DialogHeader><form id="target-form" className="form-grid" onSubmit={createTarget}><div><Label htmlFor="target-date">Target date</Label><Input id="target-date" name="date" type="date" required/></div><div><Label htmlFor="target-amount">Target balance</Label><Input id="target-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div className="full"><Label htmlFor="target-label">Label <span className="optional-label">optional</span></Label><Input id="target-label" name="label" placeholder="End of semester, halfway point…" maxLength={80}/></div></form><DialogFooter><Button type="submit" form="target-form" disabled={busy}>{busy ? <Loader2 className="spin"/> : <Target/>} Add target</Button></DialogFooter></DialogContent></Dialog>
+
       <Dialog open={manualOpen} onOpenChange={setManualOpen}><DialogContent><DialogHeader><DialogTitle>Add a manual ledger entry</DialogTitle><DialogDescription>For purchases, reimbursements or anything that did not arrive through Venmo or a cash count.</DialogDescription></DialogHeader><form id="manual-form" className="form-grid" onSubmit={manual}><div><Label htmlFor="manual-date">Date</Label><Input id="manual-date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required/></div><div><Label htmlFor="manual-amount">Amount</Label><Input id="manual-amount" name="amount" inputMode="decimal" placeholder="0.00" required/></div><div><Label htmlFor="manual-direction">Direction</Label><select className="native-select" id="manual-direction" name="direction"><option value="incoming">Money in</option><option value="outgoing">Money out</option></select></div><div><Label htmlFor="manual-source">Source</Label><select className="native-select" id="manual-source" name="source"><option value="manual">Manual</option><option value="cash">Cash</option></select></div><div><Label htmlFor="manual-person">Person / account</Label><Input id="manual-person" name="counterparty" placeholder="Costco, cash customer…"/></div><div><Label htmlFor="manual-note">Note</Label><Input id="manual-note" name="note" placeholder="What was this for?"/></div></form><DialogFooter><Button type="submit" form="manual-form" disabled={busy}>Add to ledger</Button></DialogFooter></DialogContent></Dialog>
       <Toaster richColors position="bottom-right"/>
     </div>
@@ -257,3 +283,19 @@ export default function DashboardClient({ displayName }: { displayName: string }
 function Empty({ text }: { text: string }) { return <div className="empty-state"><ReceiptText/><strong>Nothing here yet</strong><span>{text}</span></div>; }
 function Loading() { return <div className="loading-row"><Loader2 className="spin"/> Loading the books…</div>; }
 function History({ title, children }: { title: string; children: React.ReactNode }) { return <article className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">LOG BOOK</span><h2>{title}</h2></div></div><div className="history-list">{children}</div></article>; }
+
+function OutlookCard({ target, currentCents, onDelete }: { target: OutlookTarget; currentCents: number; onDelete: () => void }) {
+  const targetDate = new Date(`${target.targetDate}T12:00:00`);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const daysLeft = Math.ceil((targetDate.getTime() - today.getTime()) / 86_400_000);
+  const remaining = Math.max(0, target.targetCents - currentCents);
+  const progress = Math.max(0, Math.min(100, target.targetCents ? currentCents / target.targetCents * 100 : 0));
+  const met = remaining === 0;
+  const status = met ? "Target reached" : daysLeft < 0 ? "Target missed" : daysLeft === 0 ? "Due today" : `${money(Math.ceil(remaining / daysLeft))} per day needed`;
+  return <article className={`outlook-card ${met ? "met" : daysLeft < 0 ? "missed" : ""}`}>
+    <div className="outlook-card-top"><div><span>{target.label || "Balance target"}</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(targetDate)}</strong></div><Button variant="ghost" size="icon-sm" aria-label="Delete target" onClick={onDelete}><Trash2/></Button></div>
+    <div className="outlook-amount"><strong>{money(target.targetCents)}</strong><span>{status}</span></div>
+    <div className="outlook-track" aria-label={`${Math.round(progress)}% complete`}><span style={{ width: `${progress}%` }}/></div>
+    <div className="outlook-meta"><span>{Math.round(progress)}% reached</span><span>{met ? money(currentCents - target.targetCents) + " over" : money(remaining) + " remaining"}</span></div>
+  </article>;
+}

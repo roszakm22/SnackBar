@@ -9,10 +9,12 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Approved revenue, expenses, net performance, and customer totals
 - Cash-box counts, deposits, and withdrawals
 - Card balance audits against approved Venmo sales and non-sales deposits
+- Dated outlook targets with progress and the daily amount needed to reach each goal
+- Starting card funds included in all-time net performance and outlook progress
 - Donations and other card deposits that affect the audit without counting as income
 - Manual ledger entries
 - Public performance overview at `/`
-- Private review, cash box, card audit, and ledger workspace at `/manage`
+- Private review, cash box, card audit, outlooks, and ledger workspace at `/manage`
 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.
 

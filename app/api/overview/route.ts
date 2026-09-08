@@ -33,12 +33,14 @@ export async function GET() {
       .where(and(eq(transactions.classification, "pending"), eq(transactions.direction, "incoming")));
     const [latestCount] = await db.select({ occurredAt: cashBoxEvents.occurredAt }).from(cashBoxEvents).where(eq(cashBoxEvents.eventType, "count")).orderBy(desc(cashBoxEvents.occurredAt)).limit(1);
     const [latestAudit] = await db.select({ checkedAt: cardAudits.checkedAt }).from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
+    const [openingAudit] = await db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1);
 
     return Response.json({
       days: [...days.values()],
       pendingCount: Number(pendingCount),
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
       latestCardAuditAt: latestAudit?.checkedAt.toISOString() ?? null,
+      openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load the overview.";
