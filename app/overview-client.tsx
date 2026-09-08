@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
 type Leader = { name: string; totalCents: number; purchases: number };
-type OverviewData = { days: Day[]; pendingCount: number; latestCashCountAt: string | null; latestCardAuditAt: string | null; openingCardBalanceCents: number; leaders: Leader[] };
+type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; leaders: Leader[] };
 
 const todayValue = new Date().toISOString().slice(0, 10);
 const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 29);
 const monthAgoValue = monthAgo.toISOString().slice(0, 10);
-const emptyData: OverviewData = { days: [], pendingCount: 0, latestCashCountAt: null, latestCardAuditAt: null, openingCardBalanceCents: 0, leaders: [] };
+const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, latestCashCountAt: null, latestVenmoImportAt: null, openingCardBalanceCents: 0, leaders: [] };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 const localDate = (value: string) => new Date(`${value}T12:00:00`);
@@ -102,13 +102,13 @@ export default function OverviewClient() {
       return { key: `week${index}`, start, end, label: `${format(start)}–${format(lastDay)}` };
     });
     const rows: Array<Record<string, string | number>> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => ({ day, week0: 0, week1: 0, week2: 0, week3: 0 }));
-    data.days.forEach((day) => {
+    data.weeklyDays.forEach((day) => {
       const date = localDate(day.date);
       const week = weeks.find((item) => date >= item.start && date < item.end);
       if (week) rows[date.getDay()][week.key] = Number(rows[date.getDay()][week.key]) + day.revenueCents / 100;
     });
     return { weeks, rows, hasData: rows.some((row) => weeks.some((week) => Number(row[week.key]) > 0)) };
-  }, [data.days]);
+  }, [data.weeklyDays]);
 
   return <div className="app-shell">
     <header className="masthead"><div className="mast-inner">
@@ -127,8 +127,8 @@ export default function OverviewClient() {
             {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => [money(Number(value) * 100), Number(value) >= 0 ? "Growth after expenses" : "Unrecovered spending"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#public-net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
           <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><span className="rank">{index + 1}</span><div><strong>{leader.name}</strong><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
-          <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestCardAuditAt ? `Card was last audited ${dateTime(data.latestCardAuditAt)}.` : "The card has not been audited yet."}</p></article>
-          <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Daily revenue aligned Sunday through Saturday.</p></div></div>
+          <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoImportAt ? `Venmo activity last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo statement has been uploaded yet."}</p></article>
+          <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Venmo and manual activity aligned Sunday through Saturday; cash-box entries excluded.</p></div></div>
             {weeklyComparison.hasData ? <div className="comparison-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={weeklyComparison.rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="day" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Legend/>{weeklyComparison.weeks.map((week, index) => <Line key={week.key} type="monotone" dataKey={week.key} name={week.label} stroke={["#9aaea6", "#627a99", "#d58850", "#356859"][index]} strokeWidth={index === 3 ? 3 : 2} dot={{ r: index === 3 ? 4 : 3 }} activeDot={{ r: 5 }}/>)}</LineChart></ResponsiveContainer></div> : <Empty text="Revenue from the last four weeks will appear here." />}
           </article>
         </section>

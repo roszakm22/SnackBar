@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAudits, cashBoxEvents, transactions } from "../../../db/schema";
+import { cardAudits, cashBoxEvents, importBatches, transactions } from "../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -8,13 +8,14 @@ export async function GET(request: Request) {
   try {
     const db = getDb();
     const rows = await db
-      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty })
+      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty, source: transactions.source })
       .from(transactions)
       .where(eq(transactions.classification, "snack_bar"))
       .orderBy(asc(transactions.occurredAt))
       .limit(10000);
 
     const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
+    const weeklyDays = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
     for (const row of rows) {
       const date = row.occurredAt.toISOString().slice(0, 10);
       const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, saleCount: 0 };
@@ -25,6 +26,16 @@ export async function GET(request: Request) {
         day.expenseCents += Math.abs(row.amountCents);
       }
       days.set(date, day);
+      if (row.source !== "cash") {
+        const weeklyDay = weeklyDays.get(date) || { date, revenueCents: 0, expenseCents: 0, saleCount: 0 };
+        if (row.amountCents > 0) {
+          weeklyDay.revenueCents += row.amountCents;
+          weeklyDay.saleCount += 1;
+        } else {
+          weeklyDay.expenseCents += Math.abs(row.amountCents);
+        }
+        weeklyDays.set(date, weeklyDay);
+      }
     }
 
     const { searchParams } = new URL(request.url);
@@ -45,14 +56,15 @@ export async function GET(request: Request) {
       .from(transactions)
       .where(and(eq(transactions.classification, "pending"), eq(transactions.direction, "incoming")));
     const [latestCount] = await db.select({ occurredAt: cashBoxEvents.occurredAt }).from(cashBoxEvents).where(eq(cashBoxEvents.eventType, "count")).orderBy(desc(cashBoxEvents.occurredAt)).limit(1);
-    const [latestAudit] = await db.select({ checkedAt: cardAudits.checkedAt }).from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
+    const [latestImport] = await db.select({ createdAt: importBatches.createdAt }).from(importBatches).orderBy(desc(importBatches.createdAt)).limit(1);
     const [openingAudit] = await db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1);
 
     return Response.json({
       days: [...days.values()],
+      weeklyDays: [...weeklyDays.values()],
       pendingCount: Number(pendingCount),
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
-      latestCardAuditAt: latestAudit?.checkedAt.toISOString() ?? null,
+      latestVenmoImportAt: latestImport?.createdAt.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
       leaders: [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 10),
     });
