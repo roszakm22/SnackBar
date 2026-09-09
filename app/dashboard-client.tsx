@@ -119,10 +119,14 @@ export default function DashboardClient({ displayName }: { displayName: string }
     }).slice(-45);
   }, [data.openingCardBalanceCents, filtered, period]);
 
-  const chartZeroOffset = useMemo(() => {
-    const maximum = Math.max(0, ...chartData.map((day) => day.net));
-    const minimum = Math.min(0, ...chartData.map((day) => day.net));
-    return maximum === minimum ? 50 : maximum / (maximum - minimum) * 100;
+  const chartScale = useMemo(() => {
+    const dataMaximum = Math.max(...chartData.map((day) => day.net));
+    const dataMinimum = Math.min(...chartData.map((day) => day.net));
+    const span = Math.max(dataMaximum - dataMinimum, Math.abs(dataMaximum), Math.abs(dataMinimum), 1);
+    const padding = span * 0.08;
+    const maximum = Math.max(0, dataMaximum) + padding;
+    const minimum = Math.min(0, dataMinimum) - padding;
+    return { domain: [minimum, maximum] as [number, number], zeroOffset: maximum / (maximum - minimum) * 100 };
   }, [chartData]);
 
   const topPeople = useMemo(() => {
@@ -245,7 +249,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
             </section>
             <section className="dashboard-grid">
               <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Net position over time</h2><p>Tracks the same net performance shown above. All time includes the starting card balance.</p></div></div>
-                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v) => [money(Number(v) * 100), "Net position"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the growth chart."/>}
+                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartScale.zeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartScale.zeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis domain={chartScale.domain} tickFormatter={(v) => `$${v}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(v) => [money(Number(v) * 100), "Net position"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the growth chart."/>}
               </article>
               <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
               <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>
