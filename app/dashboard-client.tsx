@@ -90,16 +90,13 @@ export default function DashboardClient({ displayName }: { displayName: string }
       return date >= cutoff && date <= today;
     });
     const revenueCents = recent.filter((row) => row.amountCents > 0).reduce((sum, row) => sum + row.amountCents, 0);
-    const expenseCents = recent.filter((row) => row.amountCents < 0).reduce((sum, row) => sum + Math.abs(row.amountCents), 0);
     const currentBalanceCents = data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0);
     const dailyRevenueCents = revenueCents / 28;
-    const dailyExpenseCents = expenseCents / 28;
-    const dailyNetCents = dailyRevenueCents - dailyExpenseCents;
     const horizons = [7, 30, 90].map((days) => {
       const date = new Date(today); date.setDate(date.getDate() + days);
-      return { days, date, revenueCents: dailyRevenueCents * days, expenseCents: dailyExpenseCents * days, balanceCents: currentBalanceCents + dailyNetCents * days };
+      return { days, date, revenueCents: dailyRevenueCents * days, balanceCents: currentBalanceCents + dailyRevenueCents * days };
     });
-    return { revenueCents, expenseCents, dailyNetCents, currentBalanceCents, horizons };
+    return { revenueCents, dailyRevenueCents, currentBalanceCents, horizons };
   }, [data.ledger, data.openingCardBalanceCents]);
 
   const outlookChartData = useMemo(() => [
@@ -278,11 +275,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </TabsContent>
 
           <TabsContent value="outlooks" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue and expenses.</p></div></div>
-            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − expenses</p></div><div className="pace-callout"><span>Current net pace</span><b className={outlook.dailyNetCents >= 0 ? "positive" : "negative"}>{money(outlook.dailyNetCents)}/day</b></div></section>
-            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">PROJECTION PATH</span><h2>Where the balance is headed</h2><p>Current balance plus the recent daily net pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
+            <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue. Recorded expenses affect today&apos;s balance but are not assumed to repeat.</p></div></div>
+            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − recorded expenses</p></div><div className="pace-callout"><span>Current revenue pace</span><b className="positive">{money(outlook.dailyRevenueCents)}/day</b></div></section>
+            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">PROJECTION PATH</span><h2>Where the balance is headed</h2><p>Current balance plus the recent daily revenue pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
             {data.ledger.length ? <section className="outlook-grid">{outlook.horizons.map((projection) => <ProjectionCard key={projection.days} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
-            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>28-day expense pace</span><strong>{money(outlook.expenseCents / 4)} / week</strong></div><p>These are straight-line estimates. They update automatically whenever the ledger changes and do not count donations as sales.</p></article>
+            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>Future expenses assumed</span><strong>$0</strong></div><p>Recorded expenses reduce the current balance once and are not repeated in the forecast. Donations do not count as sales.</p></article>
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
@@ -309,10 +306,10 @@ function Empty({ text }: { text: string }) { return <div className="empty-state"
 function Loading() { return <div className="loading-row"><Loader2 className="spin"/> Loading the books…</div>; }
 function History({ title, children }: { title: string; children: React.ReactNode }) { return <article className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">LOG BOOK</span><h2>{title}</h2></div></div><div className="history-list">{children}</div></article>; }
 
-function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; expenseCents: number; balanceCents: number } }) {
+function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; balanceCents: number } }) {
   return <article className="outlook-card">
     <div className="projection-date"><span>IN {projection.days} DAYS</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
     <div className="outlook-amount"><strong>{money(projection.balanceCents)}</strong><span>projected balance</span></div>
-    <div className="projection-split"><span>Revenue <b>{money(projection.revenueCents)}</b></span><span>Expenses <b>{money(projection.expenseCents)}</b></span></div>
+    <div className="projection-split"><span>Added revenue <b>{money(projection.revenueCents)}</b></span><span>Expenses assumed <b>$0</b></span></div>
   </article>;
 }
