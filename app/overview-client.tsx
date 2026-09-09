@@ -71,7 +71,7 @@ export default function OverviewClient() {
   }, [data.openingCardBalanceCents, filtered, period]);
 
   const chartData = useMemo(() => {
-    let cumulativeNet = 0;
+    let cumulativeNet = period === "all" ? data.openingCardBalanceCents / 100 : 0;
     return filtered.map((day) => {
       cumulativeNet += (day.revenueCents - day.expenseCents) / 100;
       return {
@@ -79,7 +79,7 @@ export default function OverviewClient() {
         net: cumulativeNet,
       };
     }).slice(-45);
-  }, [filtered]);
+  }, [data.openingCardBalanceCents, filtered, period]);
 
   const chartZeroOffset = useMemo(() => {
     const maximum = Math.max(0, ...chartData.map((day) => day.net));
@@ -123,8 +123,8 @@ export default function OverviewClient() {
           <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.revenue)}</strong><ArrowUpRight /></article><article><span>Expenses</span><strong>{money(stats.expenses)}</strong><ArrowDownRight /></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign /></article></div>
         </section>
         <section className="dashboard-grid">
-          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Growth after expenses</h2><p>Below zero is spending that sales have not recovered. Above zero is actual growth.</p></div></div>
-            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => [money(Number(value) * 100), Number(value) >= 0 ? "Growth after expenses" : "Unrecovered spending"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#public-net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
+          <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Net position over time</h2><p>Tracks the same net performance shown above. All time includes the starting card balance.</p></div></div>
+            {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="public-net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartZeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartZeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Net position"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#public-net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
           <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><span className="rank">{index + 1}</span><div><strong>{leader.name}</strong><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
           <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoImportAt ? `Venmo activity last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo statement has been uploaded yet."}</p></article>
