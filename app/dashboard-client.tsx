@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, Banknote, BarChart3, CalendarDays, Check,
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
-  RotateCcw, ShoppingBasket, Target, Trash2, Upload, UserRound, WalletCards,
+  RotateCcw, ShoppingBasket, Target, Trash2, Trophy, Upload, UserRound, WalletCards,
 } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Toaster } from "@/components/ui/sonner";
+import { chartMoney, moneyChartScale } from "./chart-utils";
 
 type Transaction = {
   id: string; occurredAt: string; amountCents: number; source: "venmo" | "cash" | "manual";
@@ -33,10 +34,6 @@ type LedgerData = {
 
 const emptyData: LedgerData = { pending: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
-const chartMoney = (dollars: number) => {
-  const rounded = Math.abs(dollars) < 10 ? Math.round(dollars * 100) / 100 : Math.round(dollars);
-  return `$${Object.is(rounded, -0) ? 0 : rounded}`;
-};
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
@@ -123,15 +120,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
     }).slice(-45);
   }, [data.openingCardBalanceCents, filtered, period]);
 
-  const chartScale = useMemo(() => {
-    const dataMaximum = Math.max(...chartData.map((day) => day.net));
-    const dataMinimum = Math.min(...chartData.map((day) => day.net));
-    const span = Math.max(dataMaximum - dataMinimum, Math.abs(dataMaximum), Math.abs(dataMinimum), 1);
-    const padding = span * 0.08;
-    const maximum = Math.max(0, dataMaximum) + padding;
-    const minimum = Math.min(0, dataMinimum) - padding;
-    return { domain: [minimum, maximum] as [number, number], zeroOffset: maximum / (maximum - minimum) * 100 };
-  }, [chartData]);
+  const chartScale = useMemo(() => moneyChartScale(chartData.map((day) => day.net)), [chartData]);
 
   const topPeople = useMemo(() => {
     const totals = new Map<string, { total: number; visits: number }>();
@@ -253,9 +242,9 @@ export default function DashboardClient({ displayName }: { displayName: string }
             </section>
             <section className="dashboard-grid">
               <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Net position over time</h2><p>Tracks the same net performance shown above. All time includes the starting card balance.</p></div></div>
-                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartScale.zeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartScale.zeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis domain={chartScale.domain} tickFormatter={(v) => chartMoney(Number(v))} tickLine={false} axisLine={false} width={64}/><Tooltip formatter={(v) => [money(Number(v) * 100), "Net position"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the growth chart."/>}
+                {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><defs><linearGradient id="net-growth" x1="0" y1="0" x2="0" y2="1"><stop offset={`${chartScale.zeroOffset}%`} stopColor="#356859" stopOpacity={.38}/><stop offset={`${chartScale.zeroOffset}%`} stopColor="#b4493e" stopOpacity={.34}/></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis domain={chartScale.domain} ticks={chartScale.ticks} tickFormatter={(v) => chartMoney(Number(v))} tickLine={false} axisLine={false} width={64}/><Tooltip formatter={(v) => [money(Number(v) * 100), "Net position"]}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Area type="monotone" dataKey="net" stroke="#26332e" strokeWidth={3} fill="url(#net-growth)" baseValue={0}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approve transactions to start the growth chart."/>}
               </article>
-              <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><span className="rank">{i + 1}</span><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
+              <article className="panel"><div className="panel-heading"><div><span className="eyebrow">REGULARS</span><h2>Top customers</h2></div></div>{topPeople.length ? <ol className="buyer-list">{topPeople.map(([name, value], i) => <li key={name}><LeaderboardRank index={i}/><div><strong>{name}</strong><small>{value.visits} transaction{value.visits === 1 ? "" : "s"}</small></div><b>{money(value.total)}</b></li>)}</ol> : <Empty text="Customer totals appear after sales are approved."/>}</article>
               <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pending.length ? `${data.pending.length} waiting for review` : "Review queue is clear"}</h2><p>{latestCount ? `Cash box last counted ${dateTime(latestCount.occurredAt)}.` : "The cash box has not been counted yet."}</p><p>{latestAudit ? `Card was last audited ${dateTime(latestAudit.checkedAt)}.` : "The card has not been audited yet."}</p></article>
               <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Venmo and manual activity aligned Sunday through Saturday; cash-box entries excluded.</p></div></div>
                 {weeklyComparison.hasData ? <div className="comparison-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={weeklyComparison.rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="day" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Legend/>{weeklyComparison.weeks.map((week, index) => <Line key={week.key} type="monotone" dataKey={week.key} name={week.label} stroke={["#9aaea6", "#627a99", "#d58850", "#356859"][index]} strokeWidth={index === 3 ? 3 : 2} dot={{ r: index === 3 ? 4 : 3 }} activeDot={{ r: 5 }} />)}</LineChart></ResponsiveContainer></div> : <Empty text="Revenue from the last four weeks will appear here."/>}
@@ -313,6 +302,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
 function Empty({ text }: { text: string }) { return <div className="empty-state"><ReceiptText/><strong>Nothing here yet</strong><span>{text}</span></div>; }
 function Loading() { return <div className="loading-row"><Loader2 className="spin"/> Loading the books…</div>; }
 function History({ title, children }: { title: string; children: React.ReactNode }) { return <article className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">LOG BOOK</span><h2>{title}</h2></div></div><div className="history-list">{children}</div></article>; }
+
+function LeaderboardRank({ index }: { index: number }) {
+  const place = index + 1;
+  return <span className={`rank ${place <= 3 ? `trophy-rank place-${place}` : ""}`}><span className="sr-only">Rank {place}</span>{place <= 3 ? <Trophy aria-hidden="true"/> : <span aria-hidden="true">{place}</span>}</span>;
+}
 
 function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; balanceCents: number } }) {
   return <article className="outlook-card">
