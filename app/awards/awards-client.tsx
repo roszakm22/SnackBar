@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 type Tier = "Platinum" | "Gold" | "Silver" | "Bronze" | "Unranked";
 type CurrentAward = { name: string; amountCents: number; tier: Tier };
 type HistoryAward = { month: string; name: string; amountCents: number; tier: Exclude<Tier, "Unranked"> };
-type AwardsData = { currentMonth: string; current: CurrentAward[]; history: HistoryAward[] };
+type AwardsData = { currentMonth: string; current: CurrentAward[]; history: HistoryAward[]; finalizedMonths: string[] };
 
 const tiers: Tier[] = ["Platinum", "Gold", "Silver", "Bronze", "Unranked"];
 const tierDetails: Record<Tier, { floor: number; next?: number; className: string }> = {
@@ -23,7 +23,7 @@ const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "curren
 const monthLabel = (month: string) => new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-01T12:00:00Z`));
 
 export default function AwardsClient() {
-  const [data, setData] = useState<AwardsData>({ currentMonth: new Date().toISOString().slice(0, 7), current: [], history: [] });
+  const [data, setData] = useState<AwardsData>({ currentMonth: new Date().toISOString().slice(0, 7), current: [], history: [], finalizedMonths: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -41,8 +41,10 @@ export default function AwardsClient() {
   const historyMonths = useMemo(() => {
     const grouped = new Map<string, HistoryAward[]>();
     data.history.forEach((award) => grouped.set(award.month, [...(grouped.get(award.month) || []), award]));
-    return [...grouped.entries()];
-  }, [data.history]);
+    return [...new Set([...(data.finalizedMonths || []), ...grouped.keys()])]
+      .sort((a, b) => b.localeCompare(a))
+      .map((month) => [month, grouped.get(month) || []] as const);
+  }, [data.finalizedMonths, data.history]);
 
   return <div className="app-shell awards-page">
     <header className="masthead"><div className="mast-inner">
@@ -79,7 +81,7 @@ export default function AwardsClient() {
         <TabsContent value="history" className="awards-content">
           <div className="awards-month-title"><div><span className="eyebrow">Final results</span><h3>Award history</h3></div><p>Completed months are locked when the next month’s statement is imported.</p></div>
           {historyMonths.length === 0 ? <div className="empty-awards"><Award /><h3>No completed months yet</h3><p>The first month will appear here after the next month’s Venmo statement is imported.</p></div> :
-          historyMonths.map(([month, awards]) => <section className="history-month" key={month}><h3>{monthLabel(month)}</h3><div className="history-awards">{awards.map((award) => <article className={`history-award ${tierDetails[award.tier].className}`} key={`${month}-${award.name}`}><span className="award-medallion"><Award /></span><div><strong>{award.name}</strong><small>{award.tier}</small></div><b>{money(award.amountCents)}</b></article>)}</div></section>)}
+          historyMonths.map(([month, awards]) => <section className="history-month" key={month}><h3>{monthLabel(month)}</h3>{awards.length ? <div className="history-awards">{awards.map((award) => <article className={`history-award ${tierDetails[award.tier].className}`} key={`${month}-${award.name}`}><span className="award-medallion"><Award /></span><div><strong>{award.name}</strong><small>{award.tier}</small></div><b>{money(award.amountCents)}</b></article>)}</div> : <p className="history-no-awards">No awards were handed out.</p>}</section>)}
         </TabsContent>
       </Tabs>}
     </main>

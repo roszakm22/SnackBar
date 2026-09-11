@@ -42,6 +42,10 @@ export async function GET() {
     });
 
     const saved = await db.select().from(outlookTargets).orderBy(asc(outlookTargets.targetDate), asc(outlookTargets.label));
+    const finalizedMonths = saved
+      .filter((row) => row.id.startsWith("award-close:"))
+      .map((row) => row.id.slice("award-close:".length))
+      .sort((a, b) => b.localeCompare(a));
     const history = saved
       .filter((row) => row.id.startsWith("award:") && row.label && row.targetCents >= 2500)
       .map((row) => ({ month: row.targetDate, name: row.label, amountCents: row.targetCents, tier: tierFor(row.targetCents) }))
@@ -51,7 +55,7 @@ export async function GET() {
       .map(([name, amountCents]) => ({ name, amountCents, tier: tierFor(amountCents) }))
       .sort((a, b) => b.amountCents - a.amountCents);
 
-    return Response.json({ currentMonth, current, history });
+    return Response.json({ currentMonth, current, history, finalizedMonths });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load awards.";
     return Response.json({ error: message }, { status: 500 });
