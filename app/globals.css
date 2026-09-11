@@ -77,3 +77,20 @@
   .award-people{grid-template-columns:1fr}
   .awards-page .top-actions .public-badge{display:none}
 }
+
+.public-tabs{align-self:stretch;display:flex;align-items:stretch;gap:22px}
+.public-tab{position:relative;display:flex;align-items:center;gap:8px;padding:0 2px;color:#5b6861;font-size:14px;font-weight:700;text-decoration:none}
+.public-tab svg{width:18px;height:18px}
+.public-tab:hover{color:#244e43}
+.public-tab.active{color:#244e43}
+.public-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:3px;border-radius:3px 3px 0 0;background:#356859}
+.awards-page .nav-strip{margin-bottom:24px}
+.award-tier.unranked{--award:#596760}
+.award-tier-header>span{color:#46534d}
+.award-person small{color:#526059;font-weight:600}
+.award-progress{background:#d9dfda}
+.empty-awards{color:#526059}
+@media(max-width:600px){
+  .public-tabs{gap:16px}
+  .public-tab{font-size:13px}
+}

@@ -110,10 +110,10 @@ export default function OverviewClient() {
   return <div className="app-shell">
     <header className="masthead"><div className="mast-inner">
       <div className="brand-lockup"><div className="brand-stamp"><ShoppingBasket /></div><div><span className="unit-tag">DET 930</span><h1>Snack Bar</h1></div></div>
-      <div className="top-actions"><span className="public-badge">Public overview</span><Button asChild variant="outline"><a href="/awards"><Award /> Awards</a></Button><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
+      <div className="top-actions"><span className="public-badge">Public overview</span><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
     </div></header>
     <main className="workspace">
-      <div className="nav-strip"><div className="public-nav"><BarChart3 /> Overview</div><label className="period-control">View <select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label></div>
+      <div className="nav-strip"><div className="public-tabs"><span className="public-tab active"><BarChart3 /> Overview</span><a className="public-tab" href="/awards"><Award /> Awards</a></div><label className="period-control">View <select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label></div>
       {loading ? <div className="loading-row"><Loader2 className="spin" /> Loading the books…</div> : error ? <div className="overview-error">{error}</div> : <div className="section-stack">
         <section className="hero-grid">
           <article className="net-card"><span className="eyebrow light">Net performance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{stats.sales} approved sales in this view{period !== "all" && data.openingCardBalanceCents > 0 ? " · starting card funds appear in All time" : ""}</p><div className="net-stripe">{stats.starting > 0 && <span>Starting card {money(stats.starting)}</span>}<span>Revenue {money(stats.revenue)}</span><span>Expenses {money(stats.expenses)}</span></div></article>

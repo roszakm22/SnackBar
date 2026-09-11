@@ -47,10 +47,11 @@ export default function AwardsClient() {
   return <div className="app-shell awards-page">
     <header className="masthead"><div className="mast-inner">
       <div className="brand-lockup"><div className="brand-stamp"><ShoppingBasket /></div><div><span className="unit-tag">DET 930</span><h1>Snack Bar</h1></div></div>
-      <div className="top-actions"><span className="public-badge">Public awards</span><Button asChild variant="outline"><a href="/"><BarChart3 /> Overview</a></Button><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
+      <div className="top-actions"><span className="public-badge">Public awards</span><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
     </div></header>
 
     <main className="workspace">
+      <div className="nav-strip"><div className="public-tabs"><a className="public-tab" href="/"><BarChart3 /> Overview</a><span className="public-tab active"><Award /> Awards</span></div></div>
       <section className="awards-heading"><div className="awards-heading-icon"><Award /></div><div><span className="eyebrow">Monthly awards</span><h2>Snack Bar Hall of Fame</h2><p>Every purchase adds to the month. Awards are permanent once the next month begins.</p></div></section>
       {loading ? <div className="loading-row"><Loader2 className="spin" /> Loading awards…</div> : error ? <div className="overview-error">{error}</div> :
       <Tabs defaultValue="current" className="awards-tabs">
@@ -60,7 +61,6 @@ export default function AwardsClient() {
           {data.current.length === 0 ? <div className="empty-awards"><Award /><h3>No awards activity yet</h3><p>Approved Venmo purchases will show up here.</p></div> :
           tiers.map((tier) => {
             const people = data.current.filter((person) => person.tier === tier);
-            if (!people.length) return null;
             const details = tierDetails[tier];
             const nextTier = tier === "Platinum" ? null : tiers[tiers.indexOf(tier) - 1];
             return <section className={`award-tier ${details.className}`} key={tier}>
