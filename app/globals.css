@@ -35,7 +35,7 @@
 .awards-heading-icon{display:grid;place-items:center;flex:0 0 54px;width:54px;height:54px;border-radius:17px;background:#273b32;color:#fff}
 .awards-heading-icon svg{width:28px;height:28px}
 .awards-heading h2{margin:.15rem 0 .2rem;font-family:var(--font-heading);font-size:clamp(1.55rem,3vw,2.2rem);letter-spacing:-.035em}
-.awards-heading p,.awards-month-title p{margin:0;color:var(--muted)}
+.awards-heading p,.awards-month-title p{margin:0;color:#53615a}
 .awards-tabs{margin-top:1.15rem}
 .awards-tabs>[role="tablist"]{width:max-content;padding:.3rem;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.72)}
 .awards-content{display:grid;gap:1rem;margin-top:1rem}
