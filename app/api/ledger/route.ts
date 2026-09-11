@@ -99,7 +99,7 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
 export async function GET() {
   try {
     const db = getDb();
-unsafe GET deletion    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
+    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
