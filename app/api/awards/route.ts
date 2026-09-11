@@ -5,10 +5,10 @@ import { outlookTargets, transactions } from "../../../db/schema";
 export const dynamic = "force-dynamic";
 
 const tierFor = (amountCents: number) =>
-  amountCents >= 10000 ? "platinum" :
-  amountCents >= 7500 ? "gold" :
-  amountCents >= 5000 ? "silver" :
-  amountCents >= 2500 ? "bronze" : "unranked";
+  amountCents >= 10000 ? "Platinum" :
+  amountCents >= 7500 ? "Gold" :
+  amountCents >= 5000 ? "Silver" :
+  amountCents >= 2500 ? "Bronze" : "Unranked";
 
 const monthBounds = (month: string) => {
   const [year, monthNumber] = month.split("-").map(Number);
