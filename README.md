@@ -15,6 +15,8 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Manual ledger entries
 - Public performance overview at `/`
 - Public customer leaderboard with a selectable date range
+- Public monthly awards at `/awards`: Bronze at $25, Silver at $50, Gold at $75, and Platinum at $100
+- Permanent award history, finalized with a manager confirmation when the first statement from a new month is imported
 - Private review, cash box, card audit, outlooks, and ledger workspace at `/manage`
 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.
@@ -31,7 +33,7 @@ This is a Vinext Cloudflare Worker with a D1 database.
 4. Limit the Allow policy to the email addresses that should manage the snack bar. The exact path rules also cover their child routes unless a more-specific Access application overrides them.
 5. Disable or separately protect Worker preview URLs so a preview deployment cannot bypass the management policy.
 
-The root page and `/api/overview` stay public. That API returns daily aggregates, leaderboard totals, and operational timestamps; it does not return Venmo notes, individual transactions, cash balances, or current card balances.
+The root page, `/awards`, `/api/overview`, and `/api/awards` stay public. The overview API returns daily aggregates, leaderboard totals, and operational timestamps. The awards API returns customer names, monthly purchase totals, and earned tiers. Neither API returns Venmo notes, individual transactions, cash balances, or current card balances.
 
 The production D1 database is already configured as `snackbar-ledger` with the `DB` binding.
 

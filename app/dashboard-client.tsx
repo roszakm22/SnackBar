@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, Banknote, BarChart3, CalendarDays, Check,
   CircleDollarSign, ClipboardCheck, CreditCard, HandCoins, Loader2, Plus, ReceiptText,
-  RotateCcw, ShoppingBasket, Target, Trash2, Trophy, Upload, UserRound, WalletCards,
+  LogOut, RotateCcw, ShoppingBasket, Target, Trash2, Trophy, Upload, UserRound, WalletCards,
 } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -157,8 +157,37 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const file = fileRef.current?.files?.[0];
     if (!file) return toast.error("Choose a Venmo CSV first.");
-    const result = await post({ action: "import", csv: await file.text(), fileName: file.name }, "Venmo statement imported.");
-    if (result) { setUploadOpen(false); if (fileRef.current) fileRef.current.value = ""; }
+    const csv = await file.text();
+    setBusy(true);
+    try {
+      let finalizePreviousMonth = false;
+      while (true) {
+        const response = await fetch("/api/ledger", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "import", csv, fileName: file.name, finalizePreviousMonth }),
+        });
+        const result = await response.json() as { error?: string; requiresMonthFinalize?: boolean; closingMonthLabel?: string; incomingMonthLabel?: string };
+        if (response.status === 409 && result.requiresMonthFinalize && !finalizePreviousMonth) {
+          const confirmed = window.confirm(
+            `This statement contains ${result.incomingMonthLabel || "a new month"} purchases.\n\nBefore locking ${result.closingMonthLabel || "the previous month"} awards, make sure its latest Venmo CSV is already uploaded and every transaction is reviewed.\n\nFinalize the month and continue?`,
+          );
+          if (!confirmed) return;
+          finalizePreviousMonth = true;
+          continue;
+        }
+        if (!response.ok) throw new Error(result.error || "The Venmo statement could not be imported.");
+        toast.success("Venmo statement imported.");
+        await load();
+        setUploadOpen(false);
+        if (fileRef.current) fileRef.current.value = "";
+        return;
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const manual = async (event: FormEvent<HTMLFormElement>) => {
@@ -217,7 +246,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
       <header className="masthead">
         <div className="mast-inner">
           <div className="brand-lockup"><div className="brand-stamp"><ShoppingBasket /></div><div><span className="unit-tag">DET 930</span><h1>Snack Bar</h1></div></div>
-          <div className="top-actions"><span className="welcome">Hey, {displayName}</span><Button variant="outline" onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button><Button className="upload-button" onClick={() => setUploadOpen(true)}><Upload/> Import Venmo</Button></div>
+          <div className="top-actions"><span className="welcome">Hey, {displayName}</span><Button variant="outline" onClick={() => window.location.assign("/cdn-cgi/access/logout")}><LogOut/> Log out</Button><Button variant="outline" onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button><Button className="upload-button" onClick={() => setUploadOpen(true)}><Upload/> Import Venmo</Button></div>
         </div>
       </header>
 

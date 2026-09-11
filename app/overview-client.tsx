@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Loader2, LockKeyhole, ReceiptText, ShoppingBasket, Trophy } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Award, BarChart3, CircleDollarSign, Loader2, LockKeyhole, ReceiptText, ShoppingBasket, Trophy } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
@@ -110,7 +110,7 @@ export default function OverviewClient() {
   return <div className="app-shell">
     <header className="masthead"><div className="mast-inner">
       <div className="brand-lockup"><div className="brand-stamp"><ShoppingBasket /></div><div><span className="unit-tag">DET 930</span><h1>Snack Bar</h1></div></div>
-      <div className="top-actions"><span className="public-badge">Public overview</span><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
+      <div className="top-actions"><span className="public-badge">Public overview</span><Button asChild variant="outline"><a href="/awards"><Award /> Awards</a></Button><Button asChild className="upload-button"><a href="/manage"><LockKeyhole /> Manage</a></Button></div>
     </div></header>
     <main className="workspace">
       <div className="nav-strip"><div className="public-nav"><BarChart3 /> Overview</div><label className="period-control">View <select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label></div>

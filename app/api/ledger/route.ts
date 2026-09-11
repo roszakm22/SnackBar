@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, importBatches, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, importBatches, outlookTargets, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,51 @@ function serialize(row: typeof transactions.$inferSelect) {
 function parseMoney(value: unknown) {
   const amount = Number(String(value ?? "").replace(/[$,\s]/g, ""));
   return Number.isFinite(amount) ? Math.round(amount * 100) : null;
+}
+
+function monthKey(date: Date) {
+  return date.toISOString().slice(0, 7);
+}
+
+function monthLabel(month: string) {
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-01T12:00:00Z`));
+}
+
+function monthBounds(month: string) {
+  const start = new Date(`${month}-01T00:00:00Z`);
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+  return { start, end };
+}
+
+async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, now: Date) {
+  const closeId = `award-close:${month}`;
+  const [closed] = await db.select({ id: outlookTargets.id }).from(outlookTargets).where(eq(outlookTargets.id, closeId)).limit(1);
+  if (closed) return;
+
+  const { start, end } = monthBounds(month);
+  const rows = await db
+    .select({ amountCents: transactions.amountCents, counterparty: transactions.counterparty })
+    .from(transactions)
+    .where(and(
+      eq(transactions.classification, "snack_bar"),
+      eq(transactions.source, "venmo"),
+      eq(transactions.direction, "incoming"),
+      gte(transactions.occurredAt, start),
+      lt(transactions.occurredAt, end),
+    ));
+
+  const totals = new Map<string, number>();
+  rows.forEach((row) => {
+    const name = row.counterparty.trim();
+    if (name && row.amountCents > 0) totals.set(name, (totals.get(name) || 0) + row.amountCents);
+  });
+
+  await db.insert(outlookTargets).values([
+    { id: closeId, targetDate: month, targetCents: 0, label: "", createdAt: now },
+    ...[...totals.entries()]
+      .filter(([, amountCents]) => amountCents >= 2500)
+      .map(([label, targetCents]) => ({ id: `award:${month}:${crypto.randomUUID()}`, targetDate: month, targetCents, label, createdAt: now })),
+  ]).onConflictDoNothing();
 }
 
 async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Date()) {
@@ -54,8 +99,7 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
 export async function GET() {
   try {
     const db = getDb();
-    await db.delete(transactions).where(and(eq(transactions.source, "venmo"), eq(transactions.direction, "outgoing")));
-    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
+unsafe GET deletion    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
@@ -103,6 +147,47 @@ export async function POST(request: Request) {
       const fileName = String(body.fileName || "Venmo statement.csv");
       if (!csv || csv.length > 8_000_000) return Response.json({ error: "Choose a CSV smaller than 8 MB." }, { status: 400 });
       const parsed = parseVenmoCsv(csv);
+      const parsedMonths = [...new Set(parsed.transactions.filter((row) => row.direction === "incoming").map((row) => monthKey(row.occurredAt)))].sort();
+      const incomingMonth = parsedMonths.at(-1);
+      if (incomingMonth) {
+        const [latestVenmo] = await db
+          .select({ occurredAt: transactions.occurredAt })
+          .from(transactions)
+          .where(and(eq(transactions.source, "venmo"), eq(transactions.direction, "incoming")))
+          .orderBy(desc(transactions.occurredAt))
+          .limit(1);
+        const closingMonth = latestVenmo ? monthKey(latestVenmo.occurredAt) : null;
+        if (closingMonth && incomingMonth > closingMonth) {
+          const closeId = `award-close:${closingMonth}`;
+          const [closed] = await db.select({ id: outlookTargets.id }).from(outlookTargets).where(eq(outlookTargets.id, closeId)).limit(1);
+          if (!closed && body.finalizePreviousMonth !== true) {
+            return Response.json({
+              requiresMonthFinalize: true,
+              closingMonth,
+              closingMonthLabel: monthLabel(closingMonth),
+              incomingMonth,
+              incomingMonthLabel: monthLabel(incomingMonth),
+            }, { status: 409 });
+          }
+          if (!closed) {
+            const { start, end } = monthBounds(closingMonth);
+            const [pending] = await db
+              .select({ count: sql<number>`count(*)` })
+              .from(transactions)
+              .where(and(
+                eq(transactions.classification, "pending"),
+                eq(transactions.source, "venmo"),
+                eq(transactions.direction, "incoming"),
+                gte(transactions.occurredAt, start),
+                lt(transactions.occurredAt, end),
+              ));
+            if (Number(pending?.count || 0) > 0) {
+              return Response.json({ error: `Review every ${monthLabel(closingMonth)} Venmo transaction before finalizing its awards.` }, { status: 400 });
+            }
+            await finalizeAwardsMonth(db, closingMonth, new Date());
+          }
+        }
+      }
       const keys = parsed.transactions.map((row) => row.sourceKey);
       const existing = new Set<string>();
       for (let index = 0; index < keys.length; index += 75) {
