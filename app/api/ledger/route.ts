@@ -150,26 +150,31 @@ export async function POST(request: Request) {
       const parsedMonths = [...new Set(parsed.transactions.filter((row) => row.direction === "incoming").map((row) => monthKey(row.occurredAt)))].sort();
       const incomingMonth = parsedMonths.at(-1);
       if (incomingMonth) {
-        const [latestVenmo] = await db
+        const existingVenmoDates = await db
           .select({ occurredAt: transactions.occurredAt })
           .from(transactions)
-          .where(and(eq(transactions.source, "venmo"), eq(transactions.direction, "incoming")))
-          .orderBy(desc(transactions.occurredAt))
-          .limit(1);
-        const closingMonth = latestVenmo ? monthKey(latestVenmo.occurredAt) : null;
-        if (closingMonth && incomingMonth > closingMonth) {
-          const closeId = `award-close:${closingMonth}`;
-          const [closed] = await db.select({ id: outlookTargets.id }).from(outlookTargets).where(eq(outlookTargets.id, closeId)).limit(1);
-          if (!closed && body.finalizePreviousMonth !== true) {
-            return Response.json({
-              requiresMonthFinalize: true,
-              closingMonth,
-              closingMonthLabel: monthLabel(closingMonth),
-              incomingMonth,
-              incomingMonthLabel: monthLabel(incomingMonth),
-            }, { status: 409 });
-          }
-          if (!closed) {
+          .where(and(eq(transactions.source, "venmo"), eq(transactions.direction, "incoming")));
+        const awardRows = await db.select({ id: outlookTargets.id }).from(outlookTargets);
+        const closedMonths = new Set(awardRows
+          .filter((row) => row.id.startsWith("award-close:"))
+          .map((row) => row.id.slice("award-close:".length)));
+        const closingMonths = [...new Set(existingVenmoDates.map((row) => monthKey(row.occurredAt)))]
+          .filter((month) => month < incomingMonth && !closedMonths.has(month))
+          .sort();
+
+        if (closingMonths.length && body.finalizePreviousMonth !== true) {
+          return Response.json({
+            requiresMonthFinalize: true,
+            closingMonth: closingMonths.at(-1),
+            closingMonths,
+            closingMonthLabel: closingMonths.map(monthLabel).join(closingMonths.length > 2 ? ", " : " and "),
+            incomingMonth,
+            incomingMonthLabel: monthLabel(incomingMonth),
+          }, { status: 409 });
+        }
+
+        if (closingMonths.length) {
+          for (const closingMonth of closingMonths) {
             const { start, end } = monthBounds(closingMonth);
             const [pending] = await db
               .select({ count: sql<number>`count(*)` })
@@ -184,6 +189,8 @@ export async function POST(request: Request) {
             if (Number(pending?.count || 0) > 0) {
               return Response.json({ error: `Review every ${monthLabel(closingMonth)} Venmo transaction before finalizing its awards.` }, { status: 400 });
             }
+          }
+          for (const closingMonth of closingMonths) {
             await finalizeAwardsMonth(db, closingMonth, new Date());
           }
         }
