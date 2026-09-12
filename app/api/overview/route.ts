@@ -62,16 +62,32 @@ export async function GET(request: Request) {
     const savedAwards = await db
       .select({ id: outlookTargets.id, name: outlookTargets.label, month: outlookTargets.targetDate, amountCents: outlookTargets.targetCents })
       .from(outlookTargets);
-    const awardsByName = new Map<string, Array<{ month: string; tier: AwardTier }>>();
+    const awardsByName = new Map<string, Array<{ month: string; tier: AwardTier; current: boolean }>>();
     savedAwards.forEach((award) => {
       const tier = award.id.startsWith("award:") ? awardTier(award.amountCents) : null;
       const key = award.name.trim().toLowerCase();
       if (!tier || !key) return;
       const current = awardsByName.get(key) || [];
-      current.push({ month: award.month, tier });
+      current.push({ month: award.month, tier, current: false });
       awardsByName.set(key, current);
     });
-    awardsByName.forEach((awards) => awards.sort((a, b) => b.month.localeCompare(a.month)));
+
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const currentMonthTotals = new Map<string, number>();
+    rows
+      .filter((row) => row.source !== "cash" && row.amountCents > 0 && row.counterparty && row.occurredAt.toISOString().startsWith(currentMonth))
+      .forEach((row) => {
+        const key = row.counterparty!.trim().toLowerCase();
+        currentMonthTotals.set(key, (currentMonthTotals.get(key) || 0) + row.amountCents);
+      });
+    currentMonthTotals.forEach((amountCents, key) => {
+      const tier = awardTier(amountCents);
+      if (!tier) return;
+      const current = awardsByName.get(key) || [];
+      current.push({ month: currentMonth, tier, current: true });
+      awardsByName.set(key, current);
+    });
+    awardsByName.forEach((awards) => awards.sort((a, b) => Number(b.current) - Number(a.current) || b.month.localeCompare(a.month)));
     const rankedLeaders = [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents);
 
     const [{ count: pendingCount }] = await db

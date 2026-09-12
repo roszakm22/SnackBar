@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
-type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum" };
+type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum"; current: boolean };
 type Leader = { name: string; totalCents: number; purchases: number; awards: LeaderAward[] };
 type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
 
@@ -159,9 +159,9 @@ function Empty({ text }: { text: string }) {
 function LeaderAwards({ awards }: { awards: LeaderAward[] }) {
   if (!awards.length) return null;
   const visible = awards.slice(0, 6);
-  const label = awards.map((award) => `${awardMonth(award.month)} ${award.tier}`).join(", ");
-  return <span className="leader-awards" aria-label={`Past awards: ${label}`}>
-    {visible.map((award) => <span key={`${award.month}-${award.tier}`} className={`leader-award ${award.tier}`} title={`${awardMonth(award.month)} ${award.tier}`}><Trophy aria-hidden="true"/></span>)}
+  const label = awards.map((award) => `${awardMonth(award.month)} ${award.tier}${award.current ? " (current month)" : ""}`).join(", ");
+  return <span className="leader-awards" aria-label={`Awards: ${label}`}>
+    {visible.map((award) => <span key={`${award.month}-${award.tier}-${award.current}`} className={`leader-award ${award.tier}${award.current ? " current" : ""}`} title={`${awardMonth(award.month)} ${award.tier}${award.current ? " · current month" : ""}`}><Trophy aria-hidden="true"/></span>)}
     {awards.length > visible.length && <span className="leader-award-more" title={`${awards.length - visible.length} more awards`}>+${awards.length - visible.length}</span>}
   </span>;
 }
