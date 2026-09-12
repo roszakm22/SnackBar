@@ -67,6 +67,12 @@ export async function GET(request: Request) {
       latestVenmoImportAt: latestImport?.createdAt.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
       leaders: [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 10),
+      customerConcentration: (() => {
+        const ranked = [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents);
+        const topThreeCents = ranked.slice(0, 3).reduce((sum, customer) => sum + customer.totalCents, 0);
+        const totalCents = ranked.reduce((sum, customer) => sum + customer.totalCents, 0);
+        return { topThreeCents, everyoneElseCents: totalCents - topThreeCents, totalCents, customerCount: ranked.length };
+      })(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load the overview.";

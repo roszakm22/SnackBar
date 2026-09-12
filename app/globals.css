@@ -96,3 +96,26 @@
 }
 
 .history-no-awards{margin:0;padding:.9rem 1rem;border:1px dashed #bdc6c0;border-radius:10px;background:#f7f9f7;color:#53615a;font-size:1rem;font-weight:600}
+
+/* Two useful overview columns, followed by the full-width weekly comparison. */
+.dashboard-grid{align-items:start}
+.overview-chart-stack,.overview-side-stack{display:flex;min-width:0;flex-direction:column;gap:15px}
+.overview-chart-stack .chart-panel{grid-row:auto}
+.dashboard-grid>.comparison-panel{grid-column:1/-1}
+.concentration-panel .panel-heading p{margin:5px 0 0;color:#737d76;font-size:14px}
+.concentration-body{display:grid;grid-template-columns:minmax(190px,.8fr) minmax(230px,1.2fr);align-items:center;gap:24px}
+.concentration-chart{position:relative;width:100%;height:230px}
+.concentration-center{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none}
+.concentration-center strong{font-size:34px;line-height:1;color:#263b32}
+.concentration-center span{margin-top:4px;color:#66716a;font-size:13px;font-weight:650}
+.concentration-legend{display:grid;gap:4px}
+.concentration-legend>div{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #e3e7e4}
+.concentration-legend strong,.concentration-legend small{display:block}
+.concentration-legend small{margin-top:2px;color:#6a756e;font-size:13px}
+.concentration-legend b{font-variant-numeric:tabular-nums}
+.concentration-dot{width:10px;height:10px;border-radius:50%}
+.concentration-legend>p{margin:10px 0 0;color:#647069;font-size:14px}
+@media(max-width:680px){
+  .concentration-body{grid-template-columns:1fr}
+  .concentration-chart{height:210px}
+}
