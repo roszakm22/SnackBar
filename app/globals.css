@@ -96,3 +96,11 @@
 }
 
 .history-no-awards{margin:0;padding:.9rem 1rem;border:1px dashed #bdc6c0;border-radius:10px;background:#f7f9f7;color:#53615a;font-size:1rem;font-weight:600}
+
+/* Keep the overview cards content-sized instead of stretching to the leaderboard. */
+.dashboard-grid{align-items:start}
+.overview-chart-stack,.overview-side-stack{display:flex;min-width:0;flex-direction:column;gap:15px}
+.overview-chart-stack .chart-panel{grid-row:auto}
+.overview-chart-stack .comparison-panel{grid-column:auto}
+.overview-chart-stack .chart-wrap{height:330px}
+.overview-chart-stack .comparison-chart{height:300px}
