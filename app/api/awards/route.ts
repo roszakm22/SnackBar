@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { outlookTargets, transactions } from "../../../db/schema";
 
@@ -28,7 +28,10 @@ export async function GET() {
       .from(transactions)
       .where(and(
         eq(transactions.classification, "snack_bar"),
-        eq(transactions.source, "venmo"),
+        or(
+          eq(transactions.source, "venmo"),
+          and(eq(transactions.source, "manual"), eq(transactions.originalType, "Manual award purchase")),
+        ),
         eq(transactions.direction, "incoming"),
         gte(transactions.occurredAt, start),
         lt(transactions.occurredAt, end),

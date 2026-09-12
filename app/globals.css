@@ -136,3 +136,9 @@
 
 .leader-award.current{position:relative;border-color:#2f6d58;box-shadow:0 0 0 2px rgba(47,109,88,.15),0 1px 4px rgba(32,45,38,.18)}
 .leader-award.current::after{content:"";position:absolute;right:-2px;bottom:-2px;width:6px;height:6px;border:1px solid #fff;border-radius:50%;background:#2f8a68}
+
+.award-option{display:flex!important;align-items:flex-start;gap:11px;padding:13px 14px;border:1px solid #cfd8d2;border-radius:10px;background:#f3f7f4;cursor:pointer}
+.award-option input{width:18px;height:18px;margin:2px 0 0;accent-color:#356859}
+.award-option span,.award-option strong,.award-option small{display:block}
+.award-option strong{color:#29332e;font-size:14px}
+.award-option small{margin-top:3px;color:#627068;font-size:12px;line-height:1.35}

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   try {
     const db = getDb();
     const rows = await db
-      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty, source: transactions.source })
+      .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty, source: transactions.source, originalType: transactions.originalType })
       .from(transactions)
       .where(eq(transactions.classification, "snack_bar"))
       .orderBy(asc(transactions.occurredAt))
@@ -75,7 +75,7 @@ export async function GET(request: Request) {
     const currentMonth = new Date().toISOString().slice(0, 7);
     const currentMonthTotals = new Map<string, number>();
     rows
-      .filter((row) => row.source !== "cash" && row.amountCents > 0 && row.counterparty && row.occurredAt.toISOString().startsWith(currentMonth))
+      .filter((row) => (row.source === "venmo" || (row.source === "manual" && row.originalType === "Manual award purchase")) && row.amountCents > 0 && row.counterparty && row.occurredAt.toISOString().startsWith(currentMonth))
       .forEach((row) => {
         const key = row.counterparty!.trim().toLowerCase();
         currentMonthTotals.set(key, (currentMonthTotals.get(key) || 0) + row.amountCents);

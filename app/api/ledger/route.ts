@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, importBatches, outlookTargets, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
@@ -44,7 +44,10 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
     .from(transactions)
     .where(and(
       eq(transactions.classification, "snack_bar"),
-      eq(transactions.source, "venmo"),
+      or(
+        eq(transactions.source, "venmo"),
+        and(eq(transactions.source, "manual"), eq(transactions.originalType, "Manual award purchase")),
+      ),
       eq(transactions.direction, "incoming"),
       gte(transactions.occurredAt, start),
       lt(transactions.occurredAt, end),
@@ -242,10 +245,18 @@ export async function POST(request: Request) {
       const occurredAt = new Date(String(body.date || ""));
       const source = body.source === "cash" ? "cash" : "manual";
       const direction = body.direction === "outgoing" ? "outgoing" : "incoming";
+      const countTowardAwards = body.countTowardAwards === true;
+      const counterparty = String(body.counterparty || "").trim();
       if (!Number.isFinite(amount) || amount <= 0 || Number.isNaN(occurredAt.getTime())) return Response.json({ error: "Enter a valid date and an amount greater than zero." }, { status: 400 });
+      if (countTowardAwards && (source !== "manual" || direction !== "incoming")) return Response.json({ error: "Only manual money-in purchases can count toward awards." }, { status: 400 });
+      if (countTowardAwards && !counterparty) return Response.json({ error: "Enter the customer's name when counting a purchase toward awards." }, { status: 400 });
+      if (countTowardAwards) {
+        const [closedMonth] = await db.select({ id: outlookTargets.id }).from(outlookTargets).where(eq(outlookTargets.id, `award-close:${monthKey(occurredAt)}`)).limit(1);
+        if (closedMonth) return Response.json({ error: `${monthLabel(monthKey(occurredAt))} awards are already finalized.` }, { status: 400 });
+      }
       const amountCents = Math.round(amount * 100) * (direction === "outgoing" ? -1 : 1);
       const now = new Date();
-      await db.insert(transactions).values({ id: crypto.randomUUID(), sourceKey: `manual:${crypto.randomUUID()}`, importBatchId: null, occurredAt, amountCents, source, direction, counterparty: String(body.counterparty || ""), note: String(body.note || ""), originalType: "Manual entry", originalStatus: "Complete", classification: "snack_bar", createdAt: now, reviewedAt: now });
+      await db.insert(transactions).values({ id: crypto.randomUUID(), sourceKey: `manual:${crypto.randomUUID()}`, importBatchId: null, occurredAt, amountCents, source, direction, counterparty, note: String(body.note || ""), originalType: countTowardAwards ? "Manual award purchase" : "Manual entry", originalStatus: "Complete", classification: "snack_bar", createdAt: now, reviewedAt: now });
       return Response.json({ created: true });
     }
 
