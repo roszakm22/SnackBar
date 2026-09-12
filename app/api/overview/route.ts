@@ -1,8 +1,16 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAudits, cashBoxEvents, importBatches, transactions } from "../../../db/schema";
+import { cardAudits, cashBoxEvents, importBatches, outlookTargets, transactions } from "../../../db/schema";
 
 export const dynamic = "force-dynamic";
+
+type AwardTier = "bronze" | "silver" | "gold" | "platinum";
+
+const awardTier = (amountCents: number): AwardTier | null =>
+  amountCents >= 5000 ? "platinum" :
+  amountCents >= 3500 ? "gold" :
+  amountCents >= 2500 ? "silver" :
+  amountCents >= 1500 ? "bronze" : null;
 
 export async function GET(request: Request) {
   try {
@@ -51,6 +59,21 @@ export async function GET(request: Request) {
       leaders.set(row.counterparty, current);
     });
 
+    const savedAwards = await db
+      .select({ id: outlookTargets.id, name: outlookTargets.label, month: outlookTargets.targetDate, amountCents: outlookTargets.targetCents })
+      .from(outlookTargets);
+    const awardsByName = new Map<string, Array<{ month: string; tier: AwardTier }>>();
+    savedAwards.forEach((award) => {
+      const tier = award.id.startsWith("award:") ? awardTier(award.amountCents) : null;
+      const key = award.name.trim().toLowerCase();
+      if (!tier || !key) return;
+      const current = awardsByName.get(key) || [];
+      current.push({ month: award.month, tier });
+      awardsByName.set(key, current);
+    });
+    awardsByName.forEach((awards) => awards.sort((a, b) => b.month.localeCompare(a.month)));
+    const rankedLeaders = [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents);
+
     const [{ count: pendingCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(transactions)
@@ -66,12 +89,14 @@ export async function GET(request: Request) {
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
       latestVenmoImportAt: latestImport?.createdAt.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
-      leaders: [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 10),
+      leaders: rankedLeaders.slice(0, 10).map((leader) => ({
+        ...leader,
+        awards: awardsByName.get(leader.name.trim().toLowerCase()) || [],
+      })),
       customerConcentration: (() => {
-        const ranked = [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents);
-        const topThreeCents = ranked.slice(0, 3).reduce((sum, customer) => sum + customer.totalCents, 0);
-        const totalCents = ranked.reduce((sum, customer) => sum + customer.totalCents, 0);
-        return { topThreeCents, everyoneElseCents: totalCents - topThreeCents, totalCents, customerCount: ranked.length };
+        const topThreeCents = rankedLeaders.slice(0, 3).reduce((sum, customer) => sum + customer.totalCents, 0);
+        const totalCents = rankedLeaders.reduce((sum, customer) => sum + customer.totalCents, 0);
+        return { topThreeCents, everyoneElseCents: totalCents - topThreeCents, totalCents, customerCount: rankedLeaders.length };
       })(),
     });
   } catch (error) {

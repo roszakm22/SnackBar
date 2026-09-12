@@ -119,3 +119,17 @@
   .concentration-body{grid-template-columns:1fr}
   .concentration-chart{height:210px}
 }
+
+/* Compact history trophies beside public leaderboard names. */
+.buyer-details{min-width:0}
+.buyer-name-line{display:flex;min-width:0;align-items:center;gap:8px}
+.buyer-name-line>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leader-awards{display:flex;flex:0 0 auto;align-items:center;padding-left:3px}
+.leader-award{--award:#687985;display:grid;width:22px;height:22px;margin-left:-6px;place-items:center;border:2px solid #fff;border-radius:50%;background:#e7ecef;color:var(--award);box-shadow:0 1px 4px rgba(32,45,38,.18)}
+.leader-award:first-child{margin-left:0}
+.leader-award svg{width:12px;height:12px;fill:currentColor;stroke-width:1.8}
+.leader-award.bronze{--award:#96552d;background:#f2ded0}
+.leader-award.silver{--award:#5f6e78;background:#e2e8eb}
+.leader-award.gold{--award:#9a6708;background:#fae7ad}
+.leader-award.platinum{--award:#385767;background:#dce9ee}
+.leader-award-more{display:grid;height:22px;min-width:22px;margin-left:-4px;padding:0 4px;place-items:center;border:2px solid #fff;border-radius:11px;background:#2f443a;color:#fff;font-size:10px;font-weight:800;box-shadow:0 1px 4px rgba(32,45,38,.18)}

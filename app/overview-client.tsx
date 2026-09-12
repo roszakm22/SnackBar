@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
-type Leader = { name: string; totalCents: number; purchases: number };
+type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum" };
+type Leader = { name: string; totalCents: number; purchases: number; awards: LeaderAward[] };
 type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
 
 const todayValue = new Date().toISOString().slice(0, 10);
@@ -17,6 +18,7 @@ const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, lat
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 const localDate = (value: string) => new Date(`${value}T12:00:00`);
+const awardMonth = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`));
 
 export default function OverviewClient() {
   const [data, setData] = useState<OverviewData>(emptyData);
@@ -137,7 +139,7 @@ export default function OverviewClient() {
           </article>
           </div>
           <div className="overview-side-stack">
-            <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><LeaderboardRank index={index}/><div><strong>{leader.name}</strong><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
+            <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><LeaderboardRank index={index}/><div className="buyer-details"><div className="buyer-name-line"><strong>{leader.name}</strong><LeaderAwards awards={leader.awards || []}/></div><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
             <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoImportAt ? `Venmo activity last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo statement has been uploaded yet."}</p></article>
           </div>
           <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Venmo and manual activity aligned Sunday through Saturday; cash-box entries excluded.</p></div></div>
@@ -152,6 +154,16 @@ export default function OverviewClient() {
 
 function Empty({ text }: { text: string }) {
   return <div className="empty-state"><ReceiptText /><strong>Nothing here yet</strong><span>{text}</span></div>;
+}
+
+function LeaderAwards({ awards }: { awards: LeaderAward[] }) {
+  if (!awards.length) return null;
+  const visible = awards.slice(0, 6);
+  const label = awards.map((award) => `${awardMonth(award.month)} ${award.tier}`).join(", ");
+  return <span className="leader-awards" aria-label={`Past awards: ${label}`}>
+    {visible.map((award) => <span key={`${award.month}-${award.tier}`} className={`leader-award ${award.tier}`} title={`${awardMonth(award.month)} ${award.tier}`}><Trophy aria-hidden="true"/></span>)}
+    {awards.length > visible.length && <span className="leader-award-more" title={`${awards.length - visible.length} more awards`}>+${awards.length - visible.length}</span>}
+  </span>;
 }
 
 function LeaderboardRank({ index }: { index: number }) {
