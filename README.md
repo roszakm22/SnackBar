@@ -15,7 +15,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Manual ledger entries
 - Public performance overview at `/`
 - Public customer leaderboard with a selectable date range
-- Public monthly awards at `/awards`: Bronze at $25, Silver at $50, Gold at $75, and Platinum at $100
+- Public monthly awards at `/awards`: Bronze at $15, Silver at $25, Gold at $35, and Platinum at $50
 - Permanent award history, finalized with a manager confirmation when the first statement from a new month is imported
 - Private review, cash box, card audit, outlooks, and ledger workspace at `/manage`
 

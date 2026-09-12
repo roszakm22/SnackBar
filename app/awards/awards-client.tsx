@@ -12,11 +12,11 @@ type AwardsData = { currentMonth: string; current: CurrentAward[]; history: Hist
 
 const tiers: Tier[] = ["Platinum", "Gold", "Silver", "Bronze", "Unranked"];
 const tierDetails: Record<Tier, { floor: number; next?: number; className: string }> = {
-  Platinum: { floor: 10000, className: "platinum" },
-  Gold: { floor: 7500, next: 10000, className: "gold" },
-  Silver: { floor: 5000, next: 7500, className: "silver" },
-  Bronze: { floor: 2500, next: 5000, className: "bronze" },
-  Unranked: { floor: 0, next: 2500, className: "unranked" },
+  Platinum: { floor: 5000, className: "platinum" },
+  Gold: { floor: 3500, next: 5000, className: "gold" },
+  Silver: { floor: 2500, next: 3500, className: "silver" },
+  Bronze: { floor: 1500, next: 2500, className: "bronze" },
+  Unranked: { floor: 0, next: 1500, className: "unranked" },
 };
 
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
@@ -59,14 +59,14 @@ export default function AwardsClient() {
       <Tabs defaultValue="current" className="awards-tabs">
         <TabsList><TabsTrigger value="current">Current month</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
         <TabsContent value="current" className="awards-content">
-          <div className="awards-month-title"><div><span className="eyebrow">In progress</span><h3>{monthLabel(data.currentMonth)}</h3></div><p>$25 Bronze · $50 Silver · $75 Gold · $100 Platinum</p></div>
+          <div className="awards-month-title"><div><span className="eyebrow">In progress</span><h3>{monthLabel(data.currentMonth)}</h3></div><p>$15 Bronze · $25 Silver · $35 Gold · $50 Platinum</p></div>
           {data.current.length === 0 ? <div className="empty-awards"><Award /><h3>No awards activity yet</h3><p>Approved Venmo purchases will show up here.</p></div> :
           tiers.map((tier) => {
             const people = data.current.filter((person) => person.tier === tier);
             const details = tierDetails[tier];
             const nextTier = tier === "Platinum" ? null : tiers[tiers.indexOf(tier) - 1];
             return <section className={`award-tier ${details.className}`} key={tier}>
-              <div className="award-tier-header"><div><span className="award-medallion"><Award /></span><h3>{tier}</h3></div><span>{tier === "Platinum" ? "$100+" : tier === "Unranked" ? "Under $25" : `${money(details.floor)}–${money((details.next || 0) - 1)}`}</span></div>
+              <div className="award-tier-header"><div><span className="award-medallion"><Award /></span><h3>{tier}</h3></div><span>{tier === "Platinum" ? "$50+" : tier === "Unranked" ? "Under $15" : `${money(details.floor)}–${money((details.next || 0) - 1)}`}</span></div>
               <div className="award-people">{people.map((person) => {
                 const percent = details.next ? Math.min(100, (person.amountCents / details.next) * 100) : 100;
                 return <article className="award-person" key={person.name}>

@@ -5,10 +5,10 @@ import { outlookTargets, transactions } from "../../../db/schema";
 export const dynamic = "force-dynamic";
 
 const tierFor = (amountCents: number) =>
-  amountCents >= 10000 ? "Platinum" :
-  amountCents >= 7500 ? "Gold" :
-  amountCents >= 5000 ? "Silver" :
-  amountCents >= 2500 ? "Bronze" : "Unranked";
+  amountCents >= 5000 ? "Platinum" :
+  amountCents >= 3500 ? "Gold" :
+  amountCents >= 2500 ? "Silver" :
+  amountCents >= 1500 ? "Bronze" : "Unranked";
 
 const monthBounds = (month: string) => {
   const [year, monthNumber] = month.split("-").map(Number);
@@ -47,7 +47,7 @@ export async function GET() {
       .map((row) => row.id.slice("award-close:".length))
       .sort((a, b) => b.localeCompare(a));
     const history = saved
-      .filter((row) => row.id.startsWith("award:") && row.label && row.targetCents >= 2500)
+      .filter((row) => row.id.startsWith("award:") && row.label && row.targetCents >= 1500)
       .map((row) => ({ month: row.targetDate, name: row.label, amountCents: row.targetCents, tier: tierFor(row.targetCents) }))
       .sort((a, b) => b.month.localeCompare(a.month) || b.amountCents - a.amountCents);
 

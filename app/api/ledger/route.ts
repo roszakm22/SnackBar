@@ -59,7 +59,7 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
   await db.insert(outlookTargets).values([
     { id: closeId, targetDate: month, targetCents: 0, label: "", createdAt: now },
     ...[...totals.entries()]
-      .filter(([, amountCents]) => amountCents >= 2500)
+      .filter(([, amountCents]) => amountCents >= 1500)
       .map(([label, targetCents]) => ({ id: `award:${month}:${crypto.randomUUID()}`, targetDate: month, targetCents, label, createdAt: now })),
   ]).onConflictDoNothing();
 }
