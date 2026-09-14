@@ -142,3 +142,6 @@
 .award-option span,.award-option strong,.award-option small{display:block}
 .award-option strong{color:#29332e;font-size:14px}
 .award-option small{margin-top:3px;color:#627068;font-size:12px;line-height:1.35}
+
+.cash-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}
+@media(max-width:680px){.cash-actions{width:100%;justify-content:stretch}.cash-actions>button,.cash-actions>[data-slot="dialog-trigger"]{flex:1}}

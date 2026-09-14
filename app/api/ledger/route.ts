@@ -296,6 +296,21 @@ export async function POST(request: Request) {
       return Response.json({ balanceCents, calculatedChangeCents, previousBalanceCents: previousCount?.amountCents ?? 0, withdrawals, deposits });
     }
 
+    if (action === "cash_to_card") {
+      const amountCents = parseMoney(body.amount);
+      if (amountCents === null || amountCents <= 0) return Response.json({ error: "Enter a transfer amount greater than zero." }, { status: 400 });
+      const now = new Date();
+      const note = String(body.note || "").trim() || "Cash deposit to card";
+      await db.insert(cashBoxEvents).values({
+        id: crypto.randomUUID(), occurredAt: now, eventType: "withdrawal", amountCents,
+        calculatedChangeCents: 0, ledgerTransactionId: null, note, createdAt: now,
+      });
+      await db.insert(cardAdjustments).values({
+        id: crypto.randomUUID(), occurredAt: now, amountCents, note, createdAt: now,
+      });
+      return Response.json({ created: true, amountCents });
+    }
+
     if (action === "cash_adjustment") {
       const amountCents = parseMoney(body.amount);
       const eventType = body.eventType === "deposit" ? "deposit" : body.eventType === "withdrawal" ? "withdrawal" : null;
