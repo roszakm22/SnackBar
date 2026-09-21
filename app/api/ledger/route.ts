@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, importBatches, outlookTargets, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastSettings, importBatches, outlookTargets, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,31 @@ function monthBounds(month: string) {
   const start = new Date(`${month}-01T00:00:00Z`);
   const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
   return { start, end };
+}
+
+type ForecastClosure = { id: string; label: string; start: string; end: string };
+
+function validDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function parseClosures(value: string): ForecastClosure[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      const start = String(row.start || "");
+      const end = String(row.end || "");
+      if (!validDateKey(start) || !validDateKey(end) || end < start) return [];
+      return [{ id: String(row.id || crypto.randomUUID()), label: String(row.label || "").slice(0, 80), start, end }];
+    }).slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, now: Date) {
@@ -103,6 +128,7 @@ export async function GET() {
   try {
     const db = getDb();
     const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
+    const [savedForecastSettings] = await db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1);
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
@@ -115,6 +141,13 @@ export async function GET() {
     const appliedOutflowIds = new Set(appliedOutflows.map((row) => row.transactionId));
     const pendingCardOutflows = rows.filter((row) => row.classification === "snack_bar" && row.amountCents < 0 && !appliedOutflowIds.has(row.id));
     const cardSnapshot = await getCardSnapshot(db);
+    const now = new Date();
+    const termAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() >= 6 ? 6 : 0, 1));
+    const termRevenueDates = rows
+      .filter((row) => row.classification === "snack_bar" && row.amountCents > 0 && row.occurredAt >= termAnchor)
+      .map((row) => row.occurredAt)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const defaultSemesterStart = (termRevenueDates[0] || now).toISOString().slice(0, 10);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
       ledger: rows.filter((row) => row.classification === "snack_bar").map(serialize),
@@ -133,6 +166,11 @@ export async function GET() {
         adjustments: adjustments.map((adjustment) => ({ ...adjustment, occurredAt: adjustment.occurredAt.toISOString(), createdAt: adjustment.createdAt.toISOString() })),
       },
       pendingCardOutflows: pendingCardOutflows.map(serialize),
+      forecastSettings: {
+        semesterStart: savedForecastSettings?.semesterStart || defaultSemesterStart,
+        closures: parseClosures(savedForecastSettings?.closuresJson || "[]"),
+        updatedAt: savedForecastSettings?.updatedAt.toISOString() || null,
+      },
     });
   } catch (error) {
     return errorResponse(error);
@@ -144,6 +182,25 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = String(body.action || "");
     const db = getDb();
+
+    if (action === "forecast_settings") {
+      const semesterStart = String(body.semesterStart || "");
+      if (!validDateKey(semesterStart)) return Response.json({ error: "Choose a valid semester start date." }, { status: 400 });
+      const rawClosures = Array.isArray(body.closures) ? body.closures : [];
+      if (rawClosures.length > 20) return Response.json({ error: "Use 20 or fewer closure periods." }, { status: 400 });
+      const closures: ForecastClosure[] = [];
+      for (const [index, item] of rawClosures.entries()) {
+        const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+        const start = String(row.start || "");
+        const end = String(row.end || "");
+        if (!validDateKey(start) || !validDateKey(end) || end < start) return Response.json({ error: `Closure ${index + 1} needs a valid start and end date.` }, { status: 400 });
+        closures.push({ id: String(row.id || crypto.randomUUID()), label: String(row.label || "").trim().slice(0, 80), start, end });
+      }
+      const updatedAt = new Date();
+      await db.insert(forecastSettings).values({ id: "primary", semesterStart, closuresJson: JSON.stringify(closures), updatedAt })
+        .onConflictDoUpdate({ target: forecastSettings.id, set: { semesterStart, closuresJson: JSON.stringify(closures), updatedAt } });
+      return Response.json({ saved: true, semesterStart, closures, updatedAt: updatedAt.toISOString() });
+    }
 
     if (action === "import") {
       const csv = String(body.csv || "");

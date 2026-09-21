@@ -78,6 +78,13 @@ export const outlookTargets = sqliteTable(
   (table) => [index("idx_outlook_targets_date").on(table.targetDate)],
 );
 
+export const forecastSettings = sqliteTable("forecast_settings", {
+  id: text("id").primaryKey(),
+  semesterStart: text("semester_start").notNull(),
+  closuresJson: text("closures_json").notNull().default("[]"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const transactions = sqliteTable(
   "transactions",
   {

@@ -26,16 +26,28 @@ type Batch = { id: string; fileName: string; importedCount: number; duplicateCou
 type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; calculatedChangeCents: number; note: string };
 type CardAudit = { id: string; checkedAt: string; actualBalanceCents: number; expectedBalanceCents: number; varianceCents: number; ledgerMovementCents: number };
 type CardAdjustment = { id: string; occurredAt: string; amountCents: number; note: string };
+type ForecastClosure = { id: string; label: string; start: string; end: string };
+type ForecastSettings = { semesterStart: string; closures: ForecastClosure[]; updatedAt: string | null };
 type LedgerData = {
   pending: Transaction[]; pendingCardOutflows: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
   openingCardBalanceCents: number;
   cardAudit: { expectedBalanceCents: number; ledgerMovementCents: number; adjustmentCents: number; cardOutflowCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[] };
+  forecastSettings: ForecastSettings;
 };
 
-const emptyData: LedgerData = { pending: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] } };
+const emptyData: LedgerData = { pending: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, cardAudit: { expectedBalanceCents: 0, ledgerMovementCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [] }, forecastSettings: { semesterStart: "", closures: [], updatedAt: null } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const localDate = (key: string) => {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+};
+const isClosed = (date: Date, closures: ForecastClosure[]) => {
+  const key = localDateKey(date);
+  return closures.some((closure) => key >= closure.start && key <= closure.end);
+};
 
 async function api(body?: Record<string, unknown>) {
   const response = await fetch("/api/ledger", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
@@ -50,6 +62,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState("all");
   const [targetAmount, setTargetAmount] = useState("500");
+  const [forecastDraft, setForecastDraft] = useState<ForecastSettings>(emptyData.forecastSettings);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
@@ -58,7 +71,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    try { setData(await api()); }
+    try {
+      const result = await api() as LedgerData;
+      setData(result);
+      setForecastDraft(result.forecastSettings);
+    }
     catch (error) { toast.error(error instanceof Error ? error.message : "Could not load the ledger."); }
     finally { setLoading(false); }
   };
@@ -67,7 +84,6 @@ export default function DashboardClient({ displayName }: { displayName: string }
     const savedTarget = window.localStorage.getItem("snackbar-outlook-target");
     if (savedTarget) setTargetAmount(savedTarget);
   }, []);
-
   const post = async (payload: Record<string, unknown>, success: string) => {
     setBusy(true);
     try { const result = await api(payload); toast.success(success); await load(); return result; }
@@ -91,24 +107,37 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
   const outlook = useMemo(() => {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(todayStart); todayEnd.setHours(23, 59, 59, 999);
-    const cutoff = new Date(todayStart); cutoff.setDate(cutoff.getDate() - 27);
-    const recent = data.ledger.filter((row) => {
-      const date = new Date(row.occurredAt);
-      return date >= cutoff && date <= todayEnd;
-    });
-    const revenueCents = recent.filter((row) => row.amountCents > 0).reduce((sum, row) => sum + row.amountCents, 0);
+    const semesterStart = data.forecastSettings.semesterStart ? localDate(data.forecastSettings.semesterStart) : todayStart;
+    semesterStart.setHours(0, 0, 0, 0);
+    const paceDateKeys: string[] = [];
+    const cursor = new Date(todayStart); cursor.setDate(cursor.getDate() - 1);
+    while (cursor >= semesterStart && paceDateKeys.length < 14) {
+      if (!isClosed(cursor, data.forecastSettings.closures)) paceDateKeys.push(localDateKey(cursor));
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    const paceDates = new Set(paceDateKeys);
+    const revenueCents = data.ledger
+      .filter((row) => row.amountCents > 0 && paceDates.has(localDateKey(new Date(row.occurredAt))))
+      .reduce((sum, row) => sum + row.amountCents, 0);
     const currentBalanceCents = data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0);
-    const dailyRevenueCents = revenueCents / 28;
-    const todayUtc = Date.UTC(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
+    const operatingDays = paceDateKeys.length;
+    const dailyRevenueCents = operatingDays ? revenueCents / operatingDays : 0;
+    const confidence = operatingDays < 7 ? "Early estimate" : operatingDays < 14 ? "Developing" : "Established";
     const monthly = Array.from({ length: 4 }, (_, index) => {
       const date = new Date(todayStart.getFullYear(), todayStart.getMonth() + index + 1, 1, 12);
+      const future = new Date(todayStart); future.setDate(future.getDate() + 1); future.setHours(12, 0, 0, 0);
+      let operatingDaysAhead = 0;
+      while (future < date) {
+        if (!isClosed(future, data.forecastSettings.closures)) operatingDaysAhead += 1;
+        future.setDate(future.getDate() + 1);
+      }
+      const todayUtc = Date.UTC(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
       const dateUtc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
       const days = Math.max(0, Math.round((dateUtc - todayUtc) / 86_400_000));
-      return { days, date, revenueCents: dailyRevenueCents * days, balanceCents: currentBalanceCents + dailyRevenueCents * days };
+      return { days, operatingDays: operatingDaysAhead, date, revenueCents: dailyRevenueCents * operatingDaysAhead, balanceCents: currentBalanceCents + dailyRevenueCents * operatingDaysAhead };
     });
-    return { revenueCents, dailyRevenueCents, currentBalanceCents, monthly };
-  }, [data.ledger, data.openingCardBalanceCents]);
+    return { revenueCents, dailyRevenueCents, currentBalanceCents, monthly, operatingDays, confidence };
+  }, [data.forecastSettings, data.ledger, data.openingCardBalanceCents]);
 
   const targetProjection = useMemo(() => {
     const targetCents = Math.round(Number(targetAmount) * 100);
@@ -116,10 +145,21 @@ export default function DashboardClient({ displayName }: { displayName: string }
     const remainingCents = targetCents - outlook.currentBalanceCents;
     if (remainingCents <= 0) return { status: "reached" as const, targetCents, days: 0, date: new Date() };
     if (outlook.dailyRevenueCents <= 0) return { status: "unavailable" as const, targetCents, days: 0, date: null };
-    const days = Math.ceil(remainingCents / outlook.dailyRevenueCents);
-    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + days);
-    return { status: "projected" as const, targetCents, days, date };
-  }, [outlook.currentBalanceCents, outlook.dailyRevenueCents, targetAmount]);
+    const date = new Date(); date.setHours(12, 0, 0, 0);
+    let projectedGain = 0;
+    let calendarDays = 0;
+    let operatingDays = 0;
+    while (projectedGain < remainingCents && calendarDays < 3650) {
+      date.setDate(date.getDate() + 1);
+      calendarDays += 1;
+      if (!isClosed(date, data.forecastSettings.closures)) {
+        operatingDays += 1;
+        projectedGain += outlook.dailyRevenueCents;
+      }
+    }
+    if (projectedGain < remainingCents) return { status: "unavailable" as const, targetCents, days: 0, operatingDays: 0, date: null };
+    return { status: "projected" as const, targetCents, days: calendarDays, operatingDays, date };
+  }, [data.forecastSettings.closures, outlook.currentBalanceCents, outlook.dailyRevenueCents, targetAmount]);
 
   const outlookChartData = useMemo(() => [
     { label: "Now", balance: outlook.currentBalanceCents / 100 },
@@ -256,6 +296,21 @@ export default function DashboardClient({ displayName }: { displayName: string }
     await post({ action: "card_outflow_apply", transactionId }, "Expense applied to the card audit.");
   };
 
+  const saveForecastSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = await post({ action: "forecast_settings", semesterStart: forecastDraft.semesterStart, closures: forecastDraft.closures }, "Forecast settings saved.");
+    if (result) setForecastDraft((current) => ({ ...current, updatedAt: result.updatedAt }));
+  };
+
+  const addClosure = () => {
+    const today = localDateKey(new Date());
+    setForecastDraft((current) => ({ ...current, closures: [...current.closures, { id: crypto.randomUUID(), label: "", start: today, end: today }] }));
+  };
+
+  const updateClosure = (id: string, field: "label" | "start" | "end", value: string) => {
+    setForecastDraft((current) => ({ ...current, closures: current.closures.map((closure) => closure.id === id ? { ...closure, [field]: value } : closure) }));
+  };
+
   const review = async (classification: "snack_bar" | "personal") => {
     const current = data.pending[0]; if (!current) return;
     await post({ action: "review", ids: [current.id], classification }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
@@ -331,12 +386,13 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </TabsContent>
 
           <TabsContent value="outlooks" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue. Recorded expenses affect today&apos;s balance but are not assumed to repeat.</p></div></div>
-            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − recorded expenses</p></div><div className="pace-callout"><span>Current revenue pace</span><b className="positive">{money(outlook.dailyRevenueCents)}/day</b></div></section>
+            <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the most recent 14 completed operating days in this semester. Closures pause the projection instead of dragging down the pace.</p></div></div>
+            <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − recorded expenses</p></div><div className="pace-callout"><span>Current revenue pace</span><b className="positive">{money(outlook.dailyRevenueCents)}/day</b><em>{outlook.confidence} · {outlook.operatingDays} of 14 days</em></div></section>
             {data.ledger.length ? <section className="outlook-grid monthly-outlook-grid">{outlook.monthly.map((projection) => <ProjectionCard key={projection.date.toISOString()} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
-            <article className="panel target-panel"><div className="panel-heading"><div><span className="eyebrow">BALANCE GOAL</span><h2>When will we reach it?</h2><p>Choose an operating-balance target and the current revenue pace estimates the date.</p></div></div><div className="target-layout"><label className="target-control" htmlFor="outlook-target"><span>Target balance</span><div><b>$</b><Input id="outlook-target" type="number" min="0.01" step="0.01" inputMode="decimal" value={targetAmount} onChange={(event) => { setTargetAmount(event.target.value); window.localStorage.setItem("snackbar-outlook-target", event.target.value); }}/></div></label><div className={`target-result ${targetProjection.status}`}><span>{targetProjection.status === "reached" ? "GOAL STATUS" : "ESTIMATED DATE"}</span><strong>{targetProjection.status === "projected" && targetProjection.date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(targetProjection.date) : targetProjection.status === "reached" ? "Already reached" : targetProjection.status === "unavailable" ? "Not enough data" : "Enter a target"}</strong><p>{targetProjection.status === "projected" ? `${targetProjection.days} days at the current pace` : targetProjection.status === "reached" ? `${money(outlook.currentBalanceCents)} is already above ${money(targetProjection.targetCents)}` : targetProjection.status === "unavailable" ? "Approved revenue is needed before a date can be estimated." : "Use an amount greater than zero."}</p></div></div></article>
-            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">MONTHLY PATH</span><h2>Balance at the start of each month</h2><p>Current balance plus the recent daily revenue pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
-            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>Future expenses assumed</span><strong>$0</strong></div><p>Monthly balances and the goal date use the same current pace. Recorded expenses reduce today&apos;s balance once and are not repeated. Donations do not count as sales.</p></article>
+            <article className="panel target-panel"><div className="panel-heading"><div><span className="eyebrow">BALANCE GOAL</span><h2>When will we reach it?</h2><p>Choose an operating-balance target and the current revenue pace estimates the date.</p></div></div><div className="target-layout"><label className="target-control" htmlFor="outlook-target"><span>Target balance</span><div><b>$</b><Input id="outlook-target" type="number" min="0.01" step="0.01" inputMode="decimal" value={targetAmount} onChange={(event) => { setTargetAmount(event.target.value); window.localStorage.setItem("snackbar-outlook-target", event.target.value); }}/></div></label><div className={`target-result ${targetProjection.status}`}><span>{targetProjection.status === "reached" ? "GOAL STATUS" : "ESTIMATED DATE"}</span><strong>{targetProjection.status === "projected" && targetProjection.date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(targetProjection.date) : targetProjection.status === "reached" ? "Already reached" : targetProjection.status === "unavailable" ? "Not enough data" : "Enter a target"}</strong><p>{targetProjection.status === "projected" ? `${targetProjection.operatingDays} operating days over ${targetProjection.days} calendar days` : targetProjection.status === "reached" ? `${money(outlook.currentBalanceCents)} is already above ${money(targetProjection.targetCents)}` : targetProjection.status === "unavailable" ? "Approved revenue is needed before a date can be estimated." : "Use an amount greater than zero."}</p></div></div></article>
+            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">MONTHLY PATH</span><h2>Balance at the start of each month</h2><p>Current balance plus revenue only on operating days. Saved closures appear as flat periods.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
+            <article className="panel forecast-settings"><div className="panel-heading"><div><span className="eyebrow">FORECAST SETTINGS</span><h2>Semester and closures</h2><p>All seven days are operating days unless they fall inside a closure.</p></div></div><form onSubmit={saveForecastSettings}><div className="forecast-basics"><label><span>Current semester started</span><Input type="date" required value={forecastDraft.semesterStart} onChange={(event) => setForecastDraft((current) => ({ ...current, semesterStart: event.target.value }))}/></label><div><span>Normal operating days</span><strong>Sunday–Saturday</strong></div></div><div className="closure-heading"><div><strong>Scheduled closures</strong><span>Winter break, spring break, or any period with no sales</span></div><Button type="button" variant="outline" onClick={addClosure}><Plus/> Add closure</Button></div>{forecastDraft.closures.length ? <div className="closure-list">{forecastDraft.closures.map((closure) => <div className="closure-row" key={closure.id}><label><span>Name</span><Input value={closure.label} placeholder="Winter break" onChange={(event) => updateClosure(closure.id, "label", event.target.value)}/></label><label><span>First closed day</span><Input type="date" required value={closure.start} onChange={(event) => updateClosure(closure.id, "start", event.target.value)}/></label><label><span>Last closed day</span><Input type="date" required min={closure.start} value={closure.end} onChange={(event) => updateClosure(closure.id, "end", event.target.value)}/></label><Button type="button" variant="ghost" size="icon-sm" aria-label="Remove closure" onClick={() => setForecastDraft((current) => ({ ...current, closures: current.closures.filter((item) => item.id !== closure.id) }))}><Trash2/></Button></div>)}</div> : <p className="no-closures">No closures scheduled. Revenue will be projected every day.</p>}<div className="forecast-save"><span>{data.forecastSettings.updatedAt ? `Last saved ${dateTime(data.forecastSettings.updatedAt)}` : "These settings will be shared across your devices."}</span><Button disabled={busy}>{busy ? <Loader2 className="spin"/> : <Check/>} Save forecast settings</Button></div></form></article>
+            <article className="panel forecast-method"><div><span>14-day revenue pace</span><strong>{money(outlook.dailyRevenueCents * 7)} / week</strong></div><div><span>Future expenses assumed</span><strong>$0</strong></div><p>The pace uses up to 14 completed, non-closure days since the semester start. Monthly balances and the goal date skip closures. Recorded expenses reduce today&apos;s balance once and are not repeated. Donations do not count as sales.</p></article>
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
@@ -370,10 +426,10 @@ function LeaderboardRank({ index }: { index: number }) {
   return <span className={`rank ${place <= 3 ? `trophy-rank place-${place}` : ""}`}><span className="sr-only">Rank {place}</span>{place <= 3 ? <Trophy aria-hidden="true"/> : <span aria-hidden="true">{place}</span>}</span>;
 }
 
-function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; balanceCents: number } }) {
+function ProjectionCard({ projection }: { projection: { days: number; operatingDays: number; date: Date; revenueCents: number; balanceCents: number } }) {
   return <article className="outlook-card">
     <div className="projection-date"><span>START OF {new Intl.DateTimeFormat("en-US", { month: "long" }).format(projection.date).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
     <div className="outlook-amount"><strong>{money(projection.balanceCents)}</strong><span>projected balance</span></div>
-    <div className="projection-split"><span>Time from now <b>{projection.days} days</b></span><span>Added revenue <b>{money(projection.revenueCents)}</b></span></div>
+    <div className="projection-split"><span>Operating days <b>{projection.operatingDays} of {projection.days}</b></span><span>Added revenue <b>{money(projection.revenueCents)}</b></span></div>
   </article>;
 }
