@@ -145,3 +145,20 @@
 
 .cash-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}
 @media(max-width:680px){.cash-actions{width:100%;justify-content:stretch}.cash-actions>button,.cash-actions>[data-slot="dialog-trigger"]{flex:1}}
+
+/* Month-start outlooks and an editable balance goal. */
+.monthly-outlook-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.target-panel{overflow:hidden}
+.target-layout{display:grid;grid-template-columns:minmax(230px,.75fr) minmax(300px,1.25fr);gap:18px;align-items:stretch}
+.target-control{display:flex;flex-direction:column;justify-content:center;gap:8px;padding:18px;border:1px solid #d8ddd9;border-radius:13px;background:#f6f8f6;color:#617068;font-size:13px;font-weight:700}
+.target-control>div{display:grid;grid-template-columns:28px 1fr;align-items:center;border-bottom:2px solid #66756e}
+.target-control b{font-size:27px;color:#587067}
+.target-control input{height:54px;border:0!important;box-shadow:none!important;background:transparent;font-size:30px;font-weight:750;letter-spacing:-.035em;padding:0}
+.target-result{display:flex;min-height:126px;flex-direction:column;justify-content:center;padding:20px 22px;border-radius:13px;background:#2a3933;color:#fff}
+.target-result>span{font-size:11px;font-weight:800;letter-spacing:.12em;color:#bdcbc5}
+.target-result>strong{margin:7px 0 5px;font-size:clamp(24px,3vw,34px);line-height:1.05}
+.target-result>p{margin:0;color:#bdcbc5;font-size:13px}
+.target-result.reached{background:#2f6d58}
+.target-result.invalid,.target-result.unavailable{background:#58645e}
+@media(max-width:1180px){.monthly-outlook-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.monthly-outlook-grid,.target-layout{grid-template-columns:1fr}}

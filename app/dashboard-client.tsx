@@ -49,6 +49,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState("all");
+  const [targetAmount, setTargetAmount] = useState("500");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
@@ -62,6 +63,10 @@ export default function DashboardClient({ displayName }: { displayName: string }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const savedTarget = window.localStorage.getItem("snackbar-outlook-target");
+    if (savedTarget) setTargetAmount(savedTarget);
+  }, []);
 
   const post = async (payload: Record<string, unknown>, success: string) => {
     setBusy(true);
@@ -85,25 +90,43 @@ export default function DashboardClient({ displayName }: { displayName: string }
   }, [data.openingCardBalanceCents, filtered, period]);
 
   const outlook = useMemo(() => {
-    const today = new Date(); today.setHours(23, 59, 59, 999);
-    const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 27); cutoff.setHours(0, 0, 0, 0);
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart); todayEnd.setHours(23, 59, 59, 999);
+    const cutoff = new Date(todayStart); cutoff.setDate(cutoff.getDate() - 27);
     const recent = data.ledger.filter((row) => {
       const date = new Date(row.occurredAt);
-      return date >= cutoff && date <= today;
+      return date >= cutoff && date <= todayEnd;
     });
     const revenueCents = recent.filter((row) => row.amountCents > 0).reduce((sum, row) => sum + row.amountCents, 0);
     const currentBalanceCents = data.openingCardBalanceCents + data.ledger.reduce((sum, row) => sum + row.amountCents, 0);
     const dailyRevenueCents = revenueCents / 28;
-    const horizons = [7, 30, 90].map((days) => {
-      const date = new Date(today); date.setDate(date.getDate() + days);
+    const todayUtc = Date.UTC(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
+    const monthly = Array.from({ length: 4 }, (_, index) => {
+      const date = new Date(todayStart.getFullYear(), todayStart.getMonth() + index + 1, 1, 12);
+      const dateUtc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+      const days = Math.max(0, Math.round((dateUtc - todayUtc) / 86_400_000));
       return { days, date, revenueCents: dailyRevenueCents * days, balanceCents: currentBalanceCents + dailyRevenueCents * days };
     });
-    return { revenueCents, dailyRevenueCents, currentBalanceCents, horizons };
+    return { revenueCents, dailyRevenueCents, currentBalanceCents, monthly };
   }, [data.ledger, data.openingCardBalanceCents]);
+
+  const targetProjection = useMemo(() => {
+    const targetCents = Math.round(Number(targetAmount) * 100);
+    if (!Number.isFinite(targetCents) || targetCents <= 0) return { status: "invalid" as const, targetCents: 0, days: 0, date: null };
+    const remainingCents = targetCents - outlook.currentBalanceCents;
+    if (remainingCents <= 0) return { status: "reached" as const, targetCents, days: 0, date: new Date() };
+    if (outlook.dailyRevenueCents <= 0) return { status: "unavailable" as const, targetCents, days: 0, date: null };
+    const days = Math.ceil(remainingCents / outlook.dailyRevenueCents);
+    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + days);
+    return { status: "projected" as const, targetCents, days, date };
+  }, [outlook.currentBalanceCents, outlook.dailyRevenueCents, targetAmount]);
 
   const outlookChartData = useMemo(() => [
     { label: "Now", balance: outlook.currentBalanceCents / 100 },
-    ...outlook.horizons.map((projection) => ({ label: `${projection.days} days`, balance: projection.balanceCents / 100 })),
+    ...outlook.monthly.map((projection) => ({
+      label: new Intl.DateTimeFormat("en-US", { month: "short", year: "2-digit" }).format(projection.date),
+      balance: projection.balanceCents / 100,
+    })),
   ], [outlook]);
 
   const chartData = useMemo(() => {
@@ -310,9 +333,10 @@ export default function DashboardClient({ displayName }: { displayName: string }
           <TabsContent value="outlooks" className="section-stack">
             <div className="page-heading"><div><span className="eyebrow">AUTOMATIC FORECAST</span><h2>Outlook</h2><p>Projected from the last 28 days of approved revenue. Recorded expenses affect today&apos;s balance but are not assumed to repeat.</p></div></div>
             <section className="outlook-summary"><div><span className="eyebrow light">CURRENT OPERATING BALANCE</span><strong>{money(outlook.currentBalanceCents)}</strong><p>Starting card funds + approved income − recorded expenses</p></div><div className="pace-callout"><span>Current revenue pace</span><b className="positive">{money(outlook.dailyRevenueCents)}/day</b></div></section>
-            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">PROJECTION PATH</span><h2>Where the balance is headed</h2><p>Current balance plus the recent daily revenue pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
-            {data.ledger.length ? <section className="outlook-grid">{outlook.horizons.map((projection) => <ProjectionCard key={projection.days} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
-            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>Future expenses assumed</span><strong>$0</strong></div><p>Recorded expenses reduce the current balance once and are not repeated in the forecast. Donations do not count as sales.</p></article>
+            {data.ledger.length ? <section className="outlook-grid monthly-outlook-grid">{outlook.monthly.map((projection) => <ProjectionCard key={projection.date.toISOString()} projection={projection}/>)}</section> : <article className="panel"><Empty text="The forecast will appear after transactions are approved."/></article>}
+            <article className="panel target-panel"><div className="panel-heading"><div><span className="eyebrow">BALANCE GOAL</span><h2>When will we reach it?</h2><p>Choose an operating-balance target and the current revenue pace estimates the date.</p></div></div><div className="target-layout"><label className="target-control" htmlFor="outlook-target"><span>Target balance</span><div><b>$</b><Input id="outlook-target" type="number" min="0.01" step="0.01" inputMode="decimal" value={targetAmount} onChange={(event) => { setTargetAmount(event.target.value); window.localStorage.setItem("snackbar-outlook-target", event.target.value); }}/></div></label><div className={`target-result ${targetProjection.status}`}><span>{targetProjection.status === "reached" ? "GOAL STATUS" : "ESTIMATED DATE"}</span><strong>{targetProjection.status === "projected" && targetProjection.date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(targetProjection.date) : targetProjection.status === "reached" ? "Already reached" : targetProjection.status === "unavailable" ? "Not enough data" : "Enter a target"}</strong><p>{targetProjection.status === "projected" ? `${targetProjection.days} days at the current pace` : targetProjection.status === "reached" ? `${money(outlook.currentBalanceCents)} is already above ${money(targetProjection.targetCents)}` : targetProjection.status === "unavailable" ? "Approved revenue is needed before a date can be estimated." : "Use an amount greater than zero."}</p></div></div></article>
+            <article className="panel outlook-chart-panel"><div className="panel-heading"><div><span className="eyebrow">MONTHLY PATH</span><h2>Balance at the start of each month</h2><p>Current balance plus the recent daily revenue pace.</p></div></div><div className="outlook-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={outlookChartData} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="label" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={58}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Projected balance"]}/><Line type="monotone" dataKey="balance" stroke="#356859" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}/></LineChart></ResponsiveContainer></div></article>
+            <article className="panel forecast-method"><div><span>28-day revenue pace</span><strong>{money(outlook.revenueCents / 4)} / week</strong></div><div><span>Future expenses assumed</span><strong>$0</strong></div><p>Monthly balances and the goal date use the same current pace. Recorded expenses reduce today&apos;s balance once and are not repeated. Donations do not count as sales.</p></article>
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
@@ -348,8 +372,8 @@ function LeaderboardRank({ index }: { index: number }) {
 
 function ProjectionCard({ projection }: { projection: { days: number; date: Date; revenueCents: number; balanceCents: number } }) {
   return <article className="outlook-card">
-    <div className="projection-date"><span>IN {projection.days} DAYS</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
+    <div className="projection-date"><span>START OF {new Intl.DateTimeFormat("en-US", { month: "long" }).format(projection.date).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
     <div className="outlook-amount"><strong>{money(projection.balanceCents)}</strong><span>projected balance</span></div>
-    <div className="projection-split"><span>Added revenue <b>{money(projection.revenueCents)}</b></span><span>Expenses assumed <b>$0</b></span></div>
+    <div className="projection-split"><span>Time from now <b>{projection.days} days</b></span><span>Added revenue <b>{money(projection.revenueCents)}</b></span></div>
   </article>;
 }
