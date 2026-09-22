@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Award, BarChart3, Loader2, LockKeyhole, ShoppingBasket } from "lucide-react";
+import { Award, BarChart3, Loader2, LockKeyhole, Printer, ShoppingBasket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -59,7 +59,7 @@ export default function AwardsClient() {
       <Tabs defaultValue="current" className="awards-tabs">
         <TabsList><TabsTrigger value="current">Current month</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
         <TabsContent value="current" className="awards-content">
-          <div className="awards-month-title"><div><span className="eyebrow">In progress</span><h3>{monthLabel(data.currentMonth)}</h3></div><p>$15 Bronze · $25 Silver · $35 Gold · $50 Platinum</p></div>
+          <div className="awards-month-title"><div><span className="eyebrow">In progress</span><h3>{monthLabel(data.currentMonth)}</h3></div><div className="awards-month-actions"><p>$15 Bronze · $25 Silver · $35 Gold · $50 Platinum</p><Button asChild variant="outline"><a href={`/awards/print?month=${data.currentMonth}`} target="_blank" rel="noreferrer"><Printer /> Preview poster</a></Button></div></div>
           {data.current.length === 0 ? <div className="empty-awards"><Award /><h3>No awards activity yet</h3><p>Approved Venmo purchases will show up here.</p></div> :
           tiers.map((tier) => {
             const people = data.current.filter((person) => person.tier === tier);
@@ -81,7 +81,7 @@ export default function AwardsClient() {
         <TabsContent value="history" className="awards-content">
           <div className="awards-month-title"><div><span className="eyebrow">Final results</span><h3>Award history</h3></div><p>Completed months are locked when the next month’s statement is imported.</p></div>
           {historyMonths.length === 0 ? <div className="empty-awards"><Award /><h3>No completed months yet</h3><p>The first month will appear here after the next month’s Venmo statement is imported.</p></div> :
-          historyMonths.map(([month, awards]) => <section className="history-month" key={month}><h3>{monthLabel(month)}</h3>{awards.length ? <div className="history-awards">{awards.map((award) => <article className={`history-award ${tierDetails[award.tier].className}`} key={`${month}-${award.name}`}><span className="award-medallion"><Award /></span><div><strong>{award.name}</strong><small>{award.tier}</small></div><b>{money(award.amountCents)}</b></article>)}</div> : <p className="history-no-awards">No awards were handed out.</p>}</section>)}
+          historyMonths.map(([month, awards]) => <section className="history-month" key={month}><div className="history-month-heading"><h3>{monthLabel(month)}</h3><Button asChild variant="outline" size="sm"><a href={`/awards/print?month=${month}`} target="_blank" rel="noreferrer"><Printer /> Print awards</a></Button></div>{awards.length ? <div className="history-awards">{awards.map((award) => <article className={`history-award ${tierDetails[award.tier].className}`} key={`${month}-${award.name}`}><span className="award-medallion"><Award /></span><div><strong>{award.name}</strong><small>{award.tier}</small></div><b>{money(award.amountCents)}</b></article>)}</div> : <p className="history-no-awards">No awards were handed out.</p>}</section>)}
         </TabsContent>
       </Tabs>}
     </main>

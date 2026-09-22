@@ -430,6 +430,6 @@ function ProjectionCard({ projection }: { projection: { days: number; operatingD
   return <article className="outlook-card">
     <div className="projection-date"><span>START OF {new Intl.DateTimeFormat("en-US", { month: "long" }).format(projection.date).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(projection.date)}</strong></div>
     <div className="outlook-amount"><strong>{money(projection.balanceCents)}</strong><span>projected balance</span></div>
-    <div className="projection-split"><span>Operating days <b>{projection.operatingDays} of {projection.days}</b></span><span>Added revenue <b>{money(projection.revenueCents)}</b></span></div>
+    <div className="projection-split"><span>Projected days <b>{projection.operatingDays}</b></span><span>Added revenue <b>{money(projection.revenueCents)}</b></span></div>
   </article>;
 }
