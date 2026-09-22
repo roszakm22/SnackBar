@@ -21,6 +21,8 @@ export const cashBoxEvents = sqliteTable(
     occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
     eventType: text("event_type", { enum: ["count", "withdrawal", "deposit"] }).notNull(),
     amountCents: integer("amount_cents").notNull(),
+    billsCents: integer("bills_cents").notNull().default(0),
+    coinsCents: integer("coins_cents").notNull().default(0),
     calculatedChangeCents: integer("calculated_change_cents").notNull().default(0),
     ledgerTransactionId: text("ledger_transaction_id").references(() => transactions.id),
     note: text("note").notNull().default(""),
@@ -83,6 +85,17 @@ export const forecastSettings = sqliteTable("forecast_settings", {
   semesterStart: text("semester_start").notNull(),
   closuresJson: text("closures_json").notNull().default("[]"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const forecastCheckpoints = sqliteTable("forecast_checkpoints", {
+  id: text("id").primaryKey(),
+  targetCents: integer("target_cents").notNull(),
+  startingBalanceCents: integer("starting_balance_cents").notNull(),
+  dailyRevenueCents: integer("daily_revenue_cents").notNull(),
+  weekdayPacesJson: text("weekday_paces_json").notNull().default("[]"),
+  projectedDate: text("projected_date").notNull(),
+  closuresJson: text("closures_json").notNull().default("[]"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const transactions = sqliteTable(

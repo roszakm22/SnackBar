@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastSettings, importBatches, outlookTargets, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -129,6 +129,7 @@ export async function GET() {
     const db = getDb();
     const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
     const [savedForecastSettings] = await db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1);
+    const [savedForecastCheckpoint] = await db.select().from(forecastCheckpoints).where(eq(forecastCheckpoints.id, "active")).limit(1);
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
@@ -171,6 +172,20 @@ export async function GET() {
         closures: parseClosures(savedForecastSettings?.closuresJson || "[]"),
         updatedAt: savedForecastSettings?.updatedAt.toISOString() || null,
       },
+      forecastCheckpoint: savedForecastCheckpoint ? {
+        targetCents: savedForecastCheckpoint.targetCents,
+        startingBalanceCents: savedForecastCheckpoint.startingBalanceCents,
+        dailyRevenueCents: savedForecastCheckpoint.dailyRevenueCents,
+        weekdayPaces: (() => {
+          try {
+            const parsed = JSON.parse(savedForecastCheckpoint.weekdayPacesJson) as unknown;
+            return Array.isArray(parsed) && parsed.length === 7 ? parsed.map(Number) : Array(7).fill(savedForecastCheckpoint.dailyRevenueCents);
+          } catch { return Array(7).fill(savedForecastCheckpoint.dailyRevenueCents); }
+        })(),
+        projectedDate: savedForecastCheckpoint.projectedDate,
+        closures: parseClosures(savedForecastCheckpoint.closuresJson),
+        createdAt: savedForecastCheckpoint.createdAt.toISOString(),
+      } : null,
     });
   } catch (error) {
     return errorResponse(error);
@@ -200,6 +215,31 @@ export async function POST(request: Request) {
       await db.insert(forecastSettings).values({ id: "primary", semesterStart, closuresJson: JSON.stringify(closures), updatedAt })
         .onConflictDoUpdate({ target: forecastSettings.id, set: { semesterStart, closuresJson: JSON.stringify(closures), updatedAt } });
       return Response.json({ saved: true, semesterStart, closures, updatedAt: updatedAt.toISOString() });
+    }
+
+    if (action === "forecast_checkpoint") {
+      const targetCents = Number(body.targetCents);
+      const startingBalanceCents = Number(body.startingBalanceCents);
+      const dailyRevenueCents = Number(body.dailyRevenueCents);
+      const weekdayPaces = Array.isArray(body.weekdayPaces) ? body.weekdayPaces.map(Number) : [];
+      const projectedDate = String(body.projectedDate || "");
+      if (!Number.isSafeInteger(targetCents) || targetCents <= 0) return Response.json({ error: "Choose a valid goal amount." }, { status: 400 });
+      if (!Number.isSafeInteger(startingBalanceCents)) return Response.json({ error: "The current balance is invalid." }, { status: 400 });
+      if (!Number.isSafeInteger(dailyRevenueCents) || dailyRevenueCents <= 0) return Response.json({ error: "Revenue pace is needed before this goal can be tracked." }, { status: 400 });
+      if (weekdayPaces.length !== 7 || weekdayPaces.some((value) => !Number.isSafeInteger(value) || value < 0)) return Response.json({ error: "The weekday forecast is invalid." }, { status: 400 });
+      if (!validDateKey(projectedDate)) return Response.json({ error: "The projected date is invalid." }, { status: 400 });
+      const rawClosures = Array.isArray(body.closures) ? body.closures : [];
+      const closures: ForecastClosure[] = [];
+      for (const item of rawClosures.slice(0, 20)) {
+        const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+        const start = String(row.start || "");
+        const end = String(row.end || "");
+        if (validDateKey(start) && validDateKey(end) && end >= start) closures.push({ id: String(row.id || crypto.randomUUID()), label: String(row.label || "").trim().slice(0, 80), start, end });
+      }
+      const createdAt = new Date();
+      await db.insert(forecastCheckpoints).values({ id: "active", targetCents, startingBalanceCents, dailyRevenueCents, weekdayPacesJson: JSON.stringify(weekdayPaces), projectedDate, closuresJson: JSON.stringify(closures), createdAt })
+        .onConflictDoUpdate({ target: forecastCheckpoints.id, set: { targetCents, startingBalanceCents, dailyRevenueCents, weekdayPacesJson: JSON.stringify(weekdayPaces), projectedDate, closuresJson: JSON.stringify(closures), createdAt } });
+      return Response.json({ saved: true, createdAt: createdAt.toISOString() });
     }
 
     if (action === "import") {
@@ -318,10 +358,17 @@ export async function POST(request: Request) {
     }
 
     if (action === "cash_count") {
-      const balanceCents = parseMoney(body.balance);
-      if (balanceCents === null || balanceCents < 0) return Response.json({ error: "Enter the amount currently in the cash box." }, { status: 400 });
       const now = new Date();
       const [previousCount] = await db.select().from(cashBoxEvents).where(eq(cashBoxEvents.eventType, "count")).orderBy(desc(cashBoxEvents.occurredAt)).limit(1);
+      const billsCents = parseMoney(body.bills ?? body.balance);
+      const coinsWereEntered = body.coins !== undefined && body.coins !== null && String(body.coins).trim() !== "";
+      const enteredCoinsCents = coinsWereEntered ? parseMoney(body.coins) : null;
+      const previousBreakdownKnown = !previousCount || previousCount.amountCents === previousCount.billsCents + previousCount.coinsCents;
+      if (!coinsWereEntered && !previousBreakdownKnown) return Response.json({ error: "Count the coins once to establish the bill/coin split. After that, you can leave coins blank." }, { status: 400 });
+      const coinsCents = coinsWereEntered ? enteredCoinsCents : (previousCount?.coinsCents ?? 0);
+      if (billsCents === null || billsCents < 0) return Response.json({ error: "Enter the amount of bills currently in the cash box." }, { status: 400 });
+      if (coinsCents === null || coinsCents < 0) return Response.json({ error: "Enter a valid coin amount or leave it blank to reuse the last count." }, { status: 400 });
+      const balanceCents = billsCents + coinsCents;
       const since = previousCount?.occurredAt ?? new Date(0);
       const adjustments = await db.select().from(cashBoxEvents).where(and(gt(cashBoxEvents.occurredAt, since), inArray(cashBoxEvents.eventType, ["withdrawal", "deposit"])));
       const withdrawals = adjustments.filter((row) => row.eventType === "withdrawal").reduce((sum, row) => sum + row.amountCents, 0);
@@ -338,7 +385,7 @@ export async function POST(request: Request) {
           source: "cash",
           direction: calculatedChangeCents > 0 ? "incoming" : "outgoing",
           counterparty: "Cash box",
-          note: `Cash count: $${(balanceCents / 100).toFixed(2)}`,
+          note: `Cash count: $${(balanceCents / 100).toFixed(2)} ($${(billsCents / 100).toFixed(2)} bills + $${(coinsCents / 100).toFixed(2)} coins)`,
           originalType: "Cash box count",
           originalStatus: "Complete",
           classification: "snack_bar",
@@ -348,9 +395,9 @@ export async function POST(request: Request) {
       }
       await db.insert(cashBoxEvents).values({
         id: crypto.randomUUID(), occurredAt: now, eventType: "count", amountCents: balanceCents,
-        calculatedChangeCents, ledgerTransactionId: transactionId, note: String(body.note || ""), createdAt: now,
+        billsCents, coinsCents, calculatedChangeCents, ledgerTransactionId: transactionId, note: String(body.note || ""), createdAt: now,
       });
-      return Response.json({ balanceCents, calculatedChangeCents, previousBalanceCents: previousCount?.amountCents ?? 0, withdrawals, deposits });
+      return Response.json({ balanceCents, billsCents, coinsCents, coinsCarriedForward: !coinsWereEntered, calculatedChangeCents, previousBalanceCents: previousCount?.amountCents ?? 0, withdrawals, deposits });
     }
 
     if (action === "cash_to_card") {
@@ -360,7 +407,7 @@ export async function POST(request: Request) {
       const note = String(body.note || "").trim() || "Cash deposit to card";
       await db.insert(cashBoxEvents).values({
         id: crypto.randomUUID(), occurredAt: now, eventType: "withdrawal", amountCents,
-        calculatedChangeCents: 0, ledgerTransactionId: null, note, createdAt: now,
+        billsCents: 0, coinsCents: 0, calculatedChangeCents: 0, ledgerTransactionId: null, note, createdAt: now,
       });
       await db.insert(cardAdjustments).values({
         id: crypto.randomUUID(), occurredAt: now, amountCents, note, createdAt: now,
@@ -373,7 +420,7 @@ export async function POST(request: Request) {
       const eventType = body.eventType === "deposit" ? "deposit" : body.eventType === "withdrawal" ? "withdrawal" : null;
       if (amountCents === null || amountCents <= 0 || !eventType) return Response.json({ error: "Enter a valid cash movement." }, { status: 400 });
       const now = new Date();
-      await db.insert(cashBoxEvents).values({ id: crypto.randomUUID(), occurredAt: now, eventType, amountCents, calculatedChangeCents: 0, ledgerTransactionId: null, note: String(body.note || ""), createdAt: now });
+      await db.insert(cashBoxEvents).values({ id: crypto.randomUUID(), occurredAt: now, eventType, amountCents, billsCents: 0, coinsCents: 0, calculatedChangeCents: 0, ledgerTransactionId: null, note: String(body.note || ""), createdAt: now });
       return Response.json({ created: true });
     }
 
