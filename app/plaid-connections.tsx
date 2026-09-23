@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 
 type Kind = "venmo" | "amex";
 type Connection = { kind: Kind; connectedAt: string; lastSyncedAt: string | null; lastError: string | null };
+type SyncResult = { imported: number; received: { total: number; pendingIncoming: number; otherAccount: number; outgoing: number; beforeConnection: number }; transactionsStatus: { last_successful_update?: string | null; last_failed_update?: string | null } | null };
 type PlaidHandler = { open: () => void; destroy: () => void };
 declare global {
   interface Window {
@@ -49,6 +50,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   useEffect(() => { onChangedRef.current = onChanged; }, [onChanged]);
   const [configured, setConfigured] = useState(false);
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [syncResults, setSyncResults] = useState<Partial<Record<Kind, SyncResult>>>({});
   const [busy, setBusy] = useState(false);
   const [awardMonth, setAwardMonth] = useState(() => {
     const date = new Date(); date.setMonth(date.getMonth() - 1);
@@ -132,8 +134,9 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   const sync = async (kind: Kind) => {
     setBusy(true);
     try {
-      const result = await plaidApi({ action: "sync", kind }) as { imported: number };
-      toast.success(`Synced ${kind === "venmo" ? "Venmo" : "Amex"}: ${result.imported} new to review.`);
+      const result = await plaidApi({ action: "sync", kind }) as SyncResult;
+      setSyncResults((current) => ({ ...current, [kind]: result }));
+      toast.success(`Synced ${kind === "venmo" ? "Venmo" : "Amex"}: ${result.imported} new to review. See details below.`);
       await refresh(); await onChangedRef.current();
     } catch (error) { toast.error(error instanceof Error ? error.message : "Sync failed."); }
     finally { setBusy(false); }
@@ -170,6 +173,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
         return <div className="plaid-account" key={kind}>
           <div><strong>{kind === "venmo" ? "Venmo Personal" : "American Express"}</strong>
             <span>{connection ? `Connected · Last sync ${connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "pending"}` : "Not connected"}</span>
+            {syncResults[kind] && <small className="plaid-sync-detail">Plaid last checked transactions: {syncResults[kind].transactionsStatus?.last_successful_update ? new Date(syncResults[kind].transactionsStatus!.last_successful_update!).toLocaleString() : "not available"}. This sync received {syncResults[kind].received.total} updates; {syncResults[kind].received.pendingIncoming} still pending, {syncResults[kind].received.beforeConnection} dated before connection, {syncResults[kind].received.otherAccount} from another account{kind === "venmo" ? `, ${syncResults[kind].received.outgoing} money out` : ""}. Sync reads Plaid&apos;s latest stored data; it does not force Plaid to check Venmo.</small>}
             {connection?.lastError && <small className="plaid-error">{connection.lastError}</small>}</div>
           <div className="plaid-actions">
             {connection ? <>

@@ -1,6 +1,6 @@
 import {
   connectItem, createLinkToken, disconnectPlaid, getPlaidConnection,
-  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, auditAmexBalance,
+  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, auditAmexBalance, plaidTransactionsLastUpdated,
   type PlaidKind,
 } from "../../../../lib/plaid";
 
@@ -57,7 +57,11 @@ export async function POST(request: Request) {
     if (action === "sync") {
       if (!connection) return Response.json({ error: "Connection not found." }, { status: 404 });
       const synced = await syncConnection(connection);
-      return Response.json({ ...synced, ...(kind === "amex" ? { audit: await auditAmexBalance(connection) } : {}) });
+      const [status, audit] = await Promise.all([
+        plaidTransactionsLastUpdated(connection).catch(() => null),
+        kind === "amex" ? auditAmexBalance(connection) : Promise.resolve(null),
+      ]);
+      return Response.json({ ...synced, transactionsStatus: status, ...(audit ? { audit } : {}) });
     }
     if (action === "audit") {
       if (kind !== "amex" || !connection) return Response.json({ error: "Connect Amex checking first." }, { status: 400 });

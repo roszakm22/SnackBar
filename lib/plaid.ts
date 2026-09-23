@@ -211,6 +211,7 @@ export async function syncConnection(connection: Connection) {
   const accountIds = new Set(JSON.parse(connection.accountIdsJson) as string[]);
   if (!accountIds.size) throw new Error(`No eligible ${connection.kind} account is shared with Plaid. Use Reconnect to share an account.`);
   let imported = 0;
+  const received = { total: 0, pendingIncoming: 0, otherAccount: 0, outgoing: 0, beforeConnection: 0 };
   try {
     let pages: SyncPage[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -231,7 +232,14 @@ export async function syncConnection(connection: Connection) {
     }
     const db = getDb();
     for (const page of pages) {
-      for (const row of [...page.added, ...page.modified]) if (await applyTransaction(connection, row, accountIds)) imported++;
+      for (const row of [...page.added, ...page.modified]) {
+        received.total++;
+        if (!accountIds.has(row.account_id)) received.otherAccount++;
+        else if (connection.kind === "venmo" && row.amount >= 0) received.outgoing++;
+        else if (row.date < connection.connectedAt.toISOString().slice(0, 10)) received.beforeConnection++;
+        else if (row.pending) received.pendingIncoming++;
+        if (await applyTransaction(connection, row, accountIds)) imported++;
+      }
       for (const removed of page.removed) {
         const [stored] = await db.select().from(transactions).where(eq(transactions.sourceKey, `plaid:${removed.transaction_id}`)).limit(1);
         if (!stored) continue;
@@ -242,12 +250,18 @@ export async function syncConnection(connection: Connection) {
       await db.update(plaidConnections).set({ cursor: page.next_cursor, lastSyncedAt: new Date(), lastError: null }).where(eq(plaidConnections.kind, connection.kind));
     }
     if (connection.kind === "venmo") await repairPendingVenmoDescriptions();
-    return { imported, pages: pages.length };
+    return { imported, pages: pages.length, received };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown sync error";
     await getDb().update(plaidConnections).set({ lastError: message.slice(0, 300) }).where(eq(plaidConnections.kind, connection.kind));
     throw error;
   }
+}
+
+export async function plaidTransactionsLastUpdated(connection: Connection) {
+  const result = await plaidRequest<{ item: { status?: { transactions?: { last_successful_update?: string | null; last_failed_update?: string | null } } } }>(
+    "/item/get", { access_token: await decrypt(connection.encryptedToken) });
+  return result.item.status?.transactions ?? null;
 }
 
 export async function syncPlaidConnections() {
