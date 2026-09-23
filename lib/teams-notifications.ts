@@ -32,6 +32,22 @@ export async function sendTeamsTest() {
   await send("SnackBar: Teams notifications are connected. New Venmo payments and the daily review summary will appear here.", url);
 }
 
+async function dailyReviewMessage() {
+  const db = getDb();
+  const [venmo, amex] = await Promise.all(["venmo", "amex"].map(async (source) => {
+    const [row] = await db.select({ count: sql<number>`count(*)` }).from(transactions)
+      .where(and(eq(transactions.source, source as "venmo" | "amex"), eq(transactions.classification, "pending")));
+    return Number(row.count);
+  }));
+  return `SnackBar daily review: ${venmo} Venmo payment${venmo === 1 ? "" : "s"} and ${amex} Amex transaction${amex === 1 ? "" : "s"} waiting for review.`;
+}
+
+export async function sendTeamsReportNow() {
+  const url = (env as unknown as Record<string, string | undefined>).TEAMS_FLOW_URL?.trim();
+  if (!url) throw new Error("Add TEAMS_FLOW_URL as an encrypted Worker secret first.");
+  await send(await dailyReviewMessage(), url);
+}
+
 export async function sendTeamsNotifications(now = new Date()) {
   const url = (env as unknown as Record<string, string | undefined>).TEAMS_FLOW_URL?.trim();
   if (!url) return;
@@ -54,12 +70,7 @@ export async function sendTeamsNotifications(now = new Date()) {
       const id = `daily:${local.date}`;
       const [sent] = await db.select({ id: teamsNotificationRuns.id }).from(teamsNotificationRuns).where(eq(teamsNotificationRuns.id, id)).limit(1);
       if (!sent) {
-        const [venmo, amex] = await Promise.all(["venmo", "amex"].map(async (source) => {
-          const [row] = await db.select({ count: sql<number>`count(*)` }).from(transactions)
-            .where(and(eq(transactions.source, source as "venmo" | "amex"), eq(transactions.classification, "pending")));
-          return Number(row.count);
-        }));
-        await send(`SnackBar daily review: ${venmo} Venmo payment${venmo === 1 ? "" : "s"} and ${amex} Amex transaction${amex === 1 ? "" : "s"} waiting for review.`, url);
+        await send(await dailyReviewMessage(), url);
         await db.insert(teamsNotificationRuns).values({ id, deliveredAt: now }).onConflictDoNothing();
       }
     }
