@@ -157,7 +157,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
     setBusy(true);
     try {
       await plaidApi({ action: "teams_report_now" });
-      toast.success("Sent the current daily review report to your Teams workflow.");
+      toast.success("Sent the current metrics report to your Teams workflow.");
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not send Teams report."); }
     finally { setBusy(false); }
   };
@@ -188,7 +188,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
         <p>Plaid checks for posted activity; SnackBar syncs every four hours. Venmo payments and Amex deposits and purchases wait for your review.</p></div></div>
       {!configured && <p>To enable connections, add the Plaid Worker secrets and redirect URL described in the repository README.</p>}
-      <div className="plaid-account"><div><strong>Teams alerts</strong><span>{teamsReady ? "Configured · New Venmo alerts and 5 PM Chicago daily review summaries" : "Add the TEAMS_FLOW_URL Worker secret to enable alerts"}</span></div>{teamsReady && <div className="plaid-actions"><Button variant="outline" disabled={busy} onClick={() => void testTeams()}>Send test message</Button><Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button></div>}</div>
+      <div className="plaid-account"><div><strong>Teams alerts</strong><span>{teamsReady ? "Configured · New Venmo alerts and 5 PM Chicago daily metrics reports" : "Add the TEAMS_FLOW_URL Worker secret to enable alerts"}</span></div>{teamsReady && <div className="plaid-actions"><Button variant="outline" disabled={busy} onClick={() => void testTeams()}>Send test message</Button><Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button></div>}</div>
       {(["venmo", "amex"] as Kind[]).map((kind) => {
         const connection = connections.find((item) => item.kind === kind);
         return <div className="plaid-account" key={kind}>
