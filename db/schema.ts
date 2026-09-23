@@ -14,6 +14,17 @@ export const excludedKeys = sqliteTable("excluded_keys", {
   excludedAt: integer("excluded_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const plaidConnections = sqliteTable("plaid_connections", {
+  kind: text("kind", { enum: ["venmo", "amex"] }).primaryKey(),
+  itemId: text("item_id").notNull(),
+  encryptedToken: text("encrypted_token").notNull(),
+  accountIdsJson: text("account_ids_json").notNull(),
+  cursor: text("cursor"),
+  connectedAt: integer("connected_at", { mode: "timestamp_ms" }).notNull(),
+  lastSyncedAt: integer("last_synced_at", { mode: "timestamp_ms" }),
+  lastError: text("last_error"),
+});
+
 export const cashBoxEvents = sqliteTable(
   "cash_box_events",
   {
@@ -106,7 +117,7 @@ export const transactions = sqliteTable(
     importBatchId: text("import_batch_id").references(() => importBatches.id),
     occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
     amountCents: integer("amount_cents").notNull(),
-    source: text("source", { enum: ["venmo", "cash", "manual"] }).notNull(),
+    source: text("source", { enum: ["venmo", "amex", "cash", "manual"] }).notNull(),
     direction: text("direction", { enum: ["incoming", "outgoing"] }).notNull(),
     counterparty: text("counterparty").notNull().default(""),
     note: text("note").notNull().default(""),

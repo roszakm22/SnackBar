@@ -17,9 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Toaster } from "@/components/ui/sonner";
 import { chartMoney, moneyChartScale } from "./chart-utils";
+import PlaidConnections from "./plaid-connections";
 
 type Transaction = {
-  id: string; occurredAt: string; amountCents: number; source: "venmo" | "cash" | "manual";
+  id: string; occurredAt: string; amountCents: number; source: "venmo" | "amex" | "cash" | "manual";
   direction: "incoming" | "outgoing"; counterparty: string; note: string; originalType: string; createdAt: string; reviewedAt: string | null;
 };
 type Batch = { id: string; fileName: string; importedCount: number; duplicateCount: number; skippedCount: number; createdAt: string };
@@ -70,6 +71,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [movementOpen, setMovementOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [cardDepositOpen, setCardDepositOpen] = useState(false);
+  const [reviewName, setReviewName] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -391,7 +393,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
   const review = async (classification: "snack_bar" | "personal") => {
     const current = data.pending[0]; if (!current) return;
-    await post({ action: "review", ids: [current.id], classification }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
+    const result = await post({ action: "review", ids: [current.id], classification, ...(classification === "snack_bar" ? { counterparty: (reviewName ?? current.counterparty).trim() } : {}) }, classification === "snack_bar" ? "Added to the snack bar ledger." : "Marked personal and discarded.");
+    if (result) setReviewName(null);
   };
 
   const remove = async (id: string) => {
@@ -422,6 +425,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
               <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length}</span></TabsTrigger>
               <TabsTrigger value="cash"><Banknote/> Cash box</TabsTrigger>
               <TabsTrigger value="card"><CreditCard/> Card audit</TabsTrigger>
+              <TabsTrigger value="connections"><CreditCard/> Connections</TabsTrigger>
               <TabsTrigger value="outlooks"><Target/> Outlooks</TabsTrigger>
               <TabsTrigger value="ledger"><ReceiptText/> Ledger</TabsTrigger>
             </TabsList>
@@ -447,7 +451,11 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
           <TabsContent value="review" className="section-stack">
             <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2><p>Only snack bar activity enters the ledger. Personal details are discarded.</p></div><div className="review-progress"><strong>{data.pending.length}</strong><span>left to review</span></div></div>
-            {loading ? <Loading/> : current ? <div className="review-stage"><article className="review-ticket"><div className="ticket-top"><Badge variant="outline">{current.source}</Badge><span>{shortDate(current.occurredAt)}</span></div><div className={`review-amount ${current.amountCents >= 0 ? "positive" : "negative"}`}>{money(current.amountCents)}</div><div className="review-person"><div className={`direction-icon ${current.amountCents >= 0 ? "in" : "out"}`}>{current.amountCents >= 0 ? <ArrowDownRight/> : <ArrowUpRight/>}</div><div><span>{current.amountCents >= 0 ? "From" : "To"}</span><h3>{current.counterparty || "Unknown person"}</h3></div></div><div className="review-note"><span>VENMO NOTE</span><p>{current.note || "No note included"}</p></div><div className="review-actions"><Button variant="outline" size="lg" disabled={busy} onClick={() => void review("personal")}><UserRound/> Personal</Button><Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} Snack bar</Button></div><p className="privacy-note">Personal transactions are excluded permanently and their details are not retained.</p></article></div> : <div className="all-clear"><Check/><h2>All caught up.</h2><p>Import another Venmo CSV whenever you have new activity.</p><Button onClick={() => setUploadOpen(true)}><Upload/> Import Venmo</Button></div>}
+            {loading ? <Loading/> : current ? <div className="review-stage"><article className="review-ticket"><div className="ticket-top"><Badge variant="outline">{current.source}</Badge><span>{shortDate(current.occurredAt)}</span></div><div className={`review-amount ${current.amountCents >= 0 ? "positive" : "negative"}`}>{money(current.amountCents)}</div><div className="review-person"><div className={`direction-icon ${current.amountCents >= 0 ? "in" : "out"}`}>{current.amountCents >= 0 ? <ArrowDownRight/> : <ArrowUpRight/>}</div><div><span>{current.amountCents >= 0 ? "From" : "To"}</span><h3>{current.counterparty || "Unknown person"}</h3></div></div><div className="review-note"><span>{current.source === "amex" ? "AMEX DESCRIPTION" : "VENMO NOTE"}</span><p>{current.note || "No details included"}</p></div><div className="review-name"><Label htmlFor="review-name">{current.source === "amex" ? "Merchant" : "Payer name"}</Label><Input id="review-name" value={reviewName ?? current.counterparty} onChange={(event) => setReviewName(event.target.value)} placeholder="Enter the correct name"/></div><div className="review-actions"><Button variant="outline" size="lg" disabled={busy} onClick={() => void review("personal")}><UserRound/> Personal</Button><Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} Snack bar</Button></div><p className="privacy-note">Personal transactions are excluded permanently and their details are not retained.</p></article></div> : <div className="all-clear"><Check/><h2>All caught up.</h2><p>New connected account activity appears here after sync.</p><Button onClick={() => setUploadOpen(true)}><Upload/> Import older Venmo CSV</Button></div>}
+          </TabsContent>
+
+          <TabsContent value="connections" className="section-stack" forceMount>
+            <PlaidConnections onChanged={load}/>
           </TabsContent>
 
           <TabsContent value="cash" className="section-stack">

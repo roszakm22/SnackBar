@@ -5,6 +5,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 ## What it tracks
 
 - Money-in-only Venmo CSV imports with automatic duplicate detection
+- Optional Plaid sync for Venmo Personal receipts and American Express charges; new activity enters the manager's review queue
 - One-at-a-time classification as snack bar or personal
 - Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
@@ -32,6 +33,16 @@ This is a Vinext Cloudflare Worker with a D1 database.
    - `/api/ledger`
 4. Limit the Allow policy to the email addresses that should manage the snack bar. The exact path rules also cover their child routes unless a more-specific Access application overrides them.
 5. Disable or separately protect Worker preview URLs so a preview deployment cannot bypass the management policy.
+6. To enable Plaid, create a Plaid developer Trial account with Transactions access and add these **encrypted Worker secrets** in Cloudflare (never commit their values):
+   - `PLAID_CLIENT_ID` and `PLAID_SECRET` from Plaid's Production dashboard
+   - `PLAID_TOKEN_KEY`: a persistent random 32-byte key encoded as base64 (generate once with `openssl rand -base64 32`); changing it makes stored connections unreadable
+   - `PLAID_REDIRECT_URI`: the full production URL ending in `/manage`, for example `https://your-worker.example.com/manage`
+   - `PLAID_ENV`: `production` (or `sandbox` when testing with test accounts)
+7. Add that same redirect URL under **Allowed redirect URIs** in the Plaid dashboard. In **Connections** on `/manage`, link Venmo Personal and American Express separately. Select only the card accounts you use for the snack bar. The site saves encrypted Plaid access tokens in D1; the secrets stay in Cloudflare.
+
+The Worker has a Cron Trigger every four hours to fetch posted transactions. The manager can also select **Sync now**. Plaid itself checks institutions on its own schedule, so a sync may find no new data immediately after payment. Use **Reconnect** when an institution requires renewed permission; this repairs the existing Plaid Item. On the Plaid Trial plan, disconnecting does not return one of the 10 lifetime connection slots.
+
+Venmo's Plaid descriptions may not include the payer's name. Check and edit each name in the review queue before approving it; missing names are blocked from approval. Amex charges enter review as expenses and are applied to the card audit once approved. Refunds and outgoing Venmo transfers are ignored. CSV import still works for historical dates before Venmo was connected; overlapping CSVs are blocked to avoid double-counting. To close a month when using Plaid, review all of its Venmo payments and then use **Finalize awards** in Connections. Verify the last Plaid sync before closing, because late posted transactions cannot be included after an award month is finalized.
 
 The root page, `/awards`, `/api/overview`, and `/api/awards` stay public. The overview API returns daily aggregates, leaderboard totals, and operational timestamps. The awards API returns customer names, monthly purchase totals, and earned tiers. Neither API returns Venmo notes, individual transactions, cash balances, or current card balances.
 

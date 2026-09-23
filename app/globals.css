@@ -207,3 +207,11 @@
 .cash-balance-parts b{display:block;margin-top:3px;color:white;font-size:17px}
 .cash-split-pending{margin:14px 0 0!important;padding:10px 12px;border:1px dashed #65746d;border-radius:9px;color:#bdcbc5!important;font-size:12px}
 @media(max-width:680px){.cash-count-parts{grid-template-columns:1fr}}
+.plaid-panel { display: grid; gap: 1rem; }
+.plaid-account { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 0; border-top: 1px solid #ddd8cc; }
+.plaid-account > div:first-child { display: grid; gap: .25rem; }
+.plaid-account span, .plaid-footnote { color: #68716b; font-size: .9rem; }
+.plaid-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.plaid-error { color: #a64235; max-width: 28rem; }
+.review-name { display: grid; gap: .5rem; margin: 1rem 0; }
+@media (max-width: 680px) { .plaid-account { align-items: flex-start; flex-direction: column; } }

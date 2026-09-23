@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, like, lt, notLike, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +101,11 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
   const movements = await db
     .select({ amountCents: transactions.amountCents })
     .from(transactions)
-    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"), gt(transactions.occurredAt, since)));
+    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"),
+      or(
+        and(like(transactions.sourceKey, "plaid:%"), gt(transactions.reviewedAt, since)),
+        and(notLike(transactions.sourceKey, "plaid:%"), gt(transactions.occurredAt, since)),
+      )));
   const adjustments = await db
     .select({ amountCents: cardAdjustments.amountCents })
     .from(cardAdjustments)
@@ -242,11 +246,30 @@ export async function POST(request: Request) {
       return Response.json({ saved: true, createdAt: createdAt.toISOString() });
     }
 
+    if (action === "finalize_awards_month") {
+      const month = String(body.month || "");
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month >= monthKey(new Date())) {
+        return Response.json({ error: "Choose a completed month." }, { status: 400 });
+      }
+      const { start, end } = monthBounds(month);
+      const [{ pending }] = await db.select({ pending: sql<number>`count(*)` }).from(transactions).where(and(
+        eq(transactions.classification, "pending"), eq(transactions.source, "venmo"),
+        gte(transactions.occurredAt, start), lt(transactions.occurredAt, end),
+      ));
+      if (Number(pending) > 0) return Response.json({ error: "Review the month's Venmo transactions before finalizing awards." }, { status: 400 });
+      await finalizeAwardsMonth(db, month, new Date());
+      return Response.json({ finalized: month });
+    }
+
     if (action === "import") {
       const csv = String(body.csv || "");
       const fileName = String(body.fileName || "Venmo statement.csv");
       if (!csv || csv.length > 8_000_000) return Response.json({ error: "Choose a CSV smaller than 8 MB." }, { status: 400 });
       const parsed = parseVenmoCsv(csv);
+      const [plaidVenmo] = await db.select({ connectedAt: plaidConnections.connectedAt }).from(plaidConnections).where(eq(plaidConnections.kind, "venmo")).limit(1);
+      if (plaidVenmo && parsed.transactions.some((row) => row.occurredAt.toISOString().slice(0, 10) >= plaidVenmo.connectedAt.toISOString().slice(0, 10))) {
+        return Response.json({ error: "This CSV overlaps your Plaid Venmo connection. Use Sync Venmo for current payments; CSV import remains available for earlier dates." }, { status: 409 });
+      }
       const parsedMonths = [...new Set(parsed.transactions.filter((row) => row.direction === "incoming").map((row) => monthKey(row.occurredAt)))].sort();
       const incomingMonth = parsedMonths.at(-1);
       if (incomingMonth) {
@@ -320,6 +343,8 @@ export async function POST(request: Request) {
       const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 250) : [];
       const classification = body.classification === "snack_bar" ? "snack_bar" : body.classification === "personal" ? "personal" : null;
       if (!ids.length || !classification) return Response.json({ error: "Choose at least one transaction and a classification." }, { status: 400 });
+      const revisedName = body.counterparty === undefined ? null : String(body.counterparty || "").trim().slice(0, 150);
+      if (revisedName !== null && !revisedName) return Response.json({ error: "Enter a payer or merchant name." }, { status: 400 });
       if (classification === "personal") {
         for (let index = 0; index < ids.length; index += 40) {
           const idChunk = ids.slice(index, index + 40);
@@ -331,7 +356,16 @@ export async function POST(request: Request) {
         }
       } else {
         for (let index = 0; index < ids.length; index += 75) {
-          await db.update(transactions).set({ classification, reviewedAt: new Date() }).where(inArray(transactions.id, ids.slice(index, index + 75)));
+          const chunk = ids.slice(index, index + 75);
+          const rows = await db.select().from(transactions).where(and(inArray(transactions.id, chunk), eq(transactions.classification, "pending")));
+          if (rows.some((row) => row.source === "venmo" && row.sourceKey.startsWith("plaid:") && (revisedName || row.counterparty).toLowerCase().includes("unknown venmo payer"))) {
+            return Response.json({ error: "Enter the real payer name before approving this Venmo payment." }, { status: 400 });
+          }
+          await db.update(transactions).set({ classification, reviewedAt: new Date(), ...(revisedName && ids.length === 1 ? { counterparty: revisedName } : {}) }).where(and(inArray(transactions.id, chunk), eq(transactions.classification, "pending")));
+          const amexRows = rows.filter((row) => row.source === "amex" && row.amountCents < 0);
+          if (amexRows.length) await db.insert(cardOutflowApplications).values(amexRows.map((row) => ({
+            id: crypto.randomUUID(), transactionId: row.id, appliedAt: new Date(), createdAt: new Date(),
+          }))).onConflictDoNothing({ target: cardOutflowApplications.transactionId });
         }
       }
       return Response.json({ updated: ids.length });
