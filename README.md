@@ -40,7 +40,7 @@ This is a Vinext Cloudflare Worker with a D1 database.
    - `PLAID_ENV`: `production` (or `sandbox` when testing with test accounts)
 7. Add that same redirect URL under **Allowed redirect URIs** in the Plaid dashboard. In **Connections** on `/manage`, link Venmo Personal and American Express separately. Select only the card accounts you use for the snack bar. The site saves encrypted Plaid access tokens in D1; the secrets stay in Cloudflare.
 
-The Worker has a Cron Trigger every four hours to fetch posted transactions. The manager can also select **Sync now**. Plaid itself checks institutions on its own schedule, so a sync may find no new data immediately after payment. Use **Reconnect** when an institution requires renewed permission; this repairs the existing Plaid Item. On the Plaid Trial plan, disconnecting does not return one of the 10 lifetime connection slots.
+The Worker has a Cron Trigger every four hours to fetch posted transactions. The manager can also select **Sync now**. Plaid itself checks institutions on its own schedule, so a sync may find no new data immediately after payment. **Force Plaid refresh** requests the optional, potentially billable Transactions Refresh add-on for Venmo; wait a few minutes and then select **Sync now**. The button requires confirmation to reduce accidental charges. Use **Reconnect** when an institution requires renewed permission; this repairs the existing Plaid Item. On the Plaid Trial plan, disconnecting does not return one of the 10 lifetime connection slots.
 
 ### Teams notifications
 

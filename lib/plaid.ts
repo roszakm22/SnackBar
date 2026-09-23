@@ -265,6 +265,11 @@ export async function plaidTransactionsLastUpdated(connection: Connection) {
   return result.status?.transactions ?? null;
 }
 
+export async function forcePlaidTransactionsRefresh(connection: Connection) {
+  await plaidRequest("/transactions/refresh", { access_token: await decrypt(connection.encryptedToken) });
+  return { requested: true };
+}
+
 export async function syncPlaidConnections() {
   if (!plaidConfigured()) return;
   const connections = await getDb().select().from(plaidConnections);

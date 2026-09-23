@@ -144,6 +144,16 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
     finally { setBusy(false); }
   };
 
+  const forceRefresh = async () => {
+    if (!window.confirm("Request an on-demand Venmo refresh? Plaid may charge a per-request fee for Transactions Refresh.")) return;
+    setBusy(true);
+    try {
+      await plaidApi({ action: "force_refresh", kind: "venmo" });
+      toast.success("Plaid refresh requested. Wait a few minutes, then select Sync now.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Plaid refresh failed."); }
+    finally { setBusy(false); }
+  };
+
   const sendTeamsReport = async () => {
     setBusy(true);
     try {
@@ -190,6 +200,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
           <div className="plaid-actions">
             {connection ? <>
               <Button variant="outline" disabled={busy} onClick={() => void sync(kind)}>Sync now</Button>
+              {kind === "venmo" && <Button variant="outline" disabled={busy} onClick={() => void forceRefresh()}>Force Plaid refresh</Button>}
               <Button variant="outline" disabled={busy} onClick={() => void start(kind, true)}>Reconnect</Button>
               <Button variant="outline" disabled={busy} onClick={() => void disconnect(kind)}>Disconnect</Button>
             </> : <Button disabled={busy || !configured} onClick={() => void start(kind, false)}>Connect {kind === "venmo" ? "Venmo" : "Amex"}</Button>}
