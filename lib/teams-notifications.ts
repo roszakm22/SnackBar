@@ -24,12 +24,15 @@ function closuresFrom(json: string): Array<{ start: string; end: string }> {
   } catch { return []; }
 }
 
-async function send(message: string, url: string) {
+type TeamsContent = { text: string; kind?: "report"; title?: string; revenueToday?: string; revenueWeek?: string; expensesWeek?: string; balance?: string; pace?: string; projection?: string; goal?: string; review?: string };
+
+async function send(content: string | TeamsContent, url: string) {
   const endpoint = new URL(url);
   if (endpoint.protocol !== "https:") throw new Error("TEAMS_FLOW_URL must use HTTPS.");
+  const message = typeof content === "string" ? { text: content } : content;
   const response = await fetch(endpoint, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ "@type": "MessageCard", "@context": "https://schema.org/extensions", summary: "SnackBar notification", text: message }),
+    body: JSON.stringify({ "@type": "MessageCard", "@context": "https://schema.org/extensions", summary: "SnackBar notification", ...message }),
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`Teams workflow returned HTTP ${response.status}.`);
@@ -96,14 +99,14 @@ async function dailyReviewMessage(now = new Date()) {
     if (!closed(keyOf(projected), closures)) projectedBalance += weekdayPaces[projected.getUTCDay()];
     projected.setUTCDate(projected.getUTCDate() + 1);
   }
-  const lines = [
-    `SnackBar daily report · ${today}`,
-    `Revenue today: ${currency(salesByDay.get(today) || 0)}`,
-    `Last 7 days: ${currency(weeklyRevenue)} revenue · ${currency(weeklyExpenses)} expenses`,
-    `Operating balance: ${currency(balance)}`,
-    `Outlook: ${paceDays.length ? `${currency(pace)}/day (${paceDays.length} of 14 completed days)` : "Waiting for approved revenue"}`,
-    `Projected balance ${keyOf(nextMonth)}: ${paceDays.length ? currency(projectedBalance) : "Not enough data"} (future expenses excluded)`,
-  ];
+  const title = `SnackBar daily report · ${today}`;
+  const revenueToday = currency(salesByDay.get(today) || 0);
+  const revenueWeek = currency(weeklyRevenue);
+  const expensesWeek = currency(weeklyExpenses);
+  const balanceDisplay = currency(balance);
+  const paceDisplay = paceDays.length ? `${currency(pace)}/day (${paceDays.length} of 14 days)` : "Waiting for approved revenue";
+  const projection = paceDays.length ? `${currency(projectedBalance)} on ${keyOf(nextMonth)} (future expenses excluded)` : "Not enough data";
+  let goal = "No tracked goal yet";
   if (checkpoint) {
     const checkpointClosures = closuresFrom(checkpoint.closuresJson);
     let checkpointPaces: number[];
@@ -118,10 +121,13 @@ async function dailyReviewMessage(now = new Date()) {
     const variance = balance - planned;
     const threshold = Math.max(200, checkpoint.dailyRevenueCents * .15);
     const status = balance >= checkpoint.targetCents ? "Goal reached" : variance < -threshold ? "Behind plan" : variance > threshold ? "Ahead of plan" : "On pace";
-    lines.push(`Tracked goal ${currency(checkpoint.targetCents)}: ${status} (${variance >= 0 ? "+" : "-"}${currency(Math.abs(variance))} vs. original plan)`);
+    goal = `${currency(checkpoint.targetCents)} · ${status} (${variance >= 0 ? "+" : "-"}${currency(Math.abs(variance))} vs. original plan)`;
   }
-  lines.push(`Waiting for review: ${venmo} Venmo · ${amex} Amex`);
-  return lines.join("\n");
+  const review = `${venmo} Venmo · ${amex} Amex`;
+  const text = [title, `Revenue today: ${revenueToday}`, `Last 7 days: ${revenueWeek} revenue · ${expensesWeek} expenses`,
+    `Operating balance: ${balanceDisplay}`, `Revenue pace: ${paceDisplay}`, `Projected balance: ${projection}`,
+    `Tracked goal: ${goal}`, `Waiting for review: ${review}`].join("\n");
+  return { kind: "report" as const, title, revenueToday, revenueWeek, expensesWeek, balance: balanceDisplay, pace: paceDisplay, projection, goal, review, text };
 }
 
 export async function sendTeamsReportNow() {
