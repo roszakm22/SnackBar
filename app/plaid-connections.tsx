@@ -72,12 +72,14 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
           setBusy(true);
           try {
             if (reconnect) {
-              await plaidApi({ action: "reconnect_complete", kind });
-              toast.success(`${kind === "venmo" ? "Venmo" : "Amex"} reconnected.`);
+              const result = await plaidApi({ action: "reconnect_complete", kind }) as { warning?: string | null };
+              if (result.warning) toast.error(result.warning);
+              else toast.success(`${kind === "venmo" ? "Venmo" : "Amex"} reconnected.`);
             } else {
               if (!publicToken) throw new Error("Plaid did not provide an authorization token.");
-              await plaidApi({ action: "exchange", kind, publicToken });
-              toast.success(`${kind === "venmo" ? "Venmo" : "Amex"} connected.`);
+              const result = await plaidApi({ action: "exchange", kind, publicToken }) as { connected: { warning?: string | null } };
+              if (result.connected.warning) toast.error(result.connected.warning);
+              else toast.success(`${kind === "venmo" ? "Venmo" : "Amex"} connected.`);
             }
             localStorage.removeItem(savedLinkKey);
             await refresh();

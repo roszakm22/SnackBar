@@ -110,17 +110,30 @@ export async function connectItem(kind: PlaidKind, publicToken: string) {
     throw new Error(`Connected ${institutionName}; choose ${kind === "venmo" ? "Venmo Personal" : "American Express"} instead.`);
   }
   const accounts = await plaidRequest<{ accounts: PlaidAccount[] }>("/accounts/get", { access_token: exchanged.access_token });
-  const selected = accounts.accounts.filter((account) => kind === "amex" ? account.type === "credit" : account.type === "depository");
-  if (!selected.length) {
-    await plaidRequest("/item/remove", { access_token: exchanged.access_token });
-    throw new Error(`No eligible ${kind} account was shared with Plaid.`);
-  }
+  const selected = eligibleAccounts(kind, accounts.accounts);
+  const warning = selected.length ? null : `No eligible ${kind} account was shared with Plaid. Reconnect to share a checking or credit account.`;
   await db.insert(plaidConnections).values({
     kind, itemId: exchanged.item_id, encryptedToken: await encrypt(exchanged.access_token),
     accountIdsJson: JSON.stringify(selected.map((account) => account.account_id)),
-    cursor: null, connectedAt: new Date(), lastSyncedAt: null, lastError: null,
+    cursor: null, connectedAt: new Date(), lastSyncedAt: null, lastError: warning,
   });
-  return { kind, institution: institutionName, accounts: selected.map((account) => account.name) };
+  return { kind, institution: institutionName, accounts: selected.map((account) => account.name), warning };
+}
+
+function eligibleAccounts(kind: PlaidKind, accounts: PlaidAccount[]) {
+  return accounts.filter((account) => kind === "venmo"
+    ? account.type === "depository"
+    : account.type === "credit" || (account.type === "depository" && account.subtype === "checking"));
+}
+
+export async function refreshConnectedAccounts(connection: Connection) {
+  const accounts = await plaidRequest<{ accounts: PlaidAccount[] }>("/accounts/get", { access_token: await decrypt(connection.encryptedToken) });
+  const selected = eligibleAccounts(connection.kind, accounts.accounts);
+  const warning = selected.length ? null : `No eligible ${connection.kind} account was shared with Plaid. Reconnect to share a checking or credit account.`;
+  await getDb().update(plaidConnections).set({
+    accountIdsJson: JSON.stringify(selected.map((account) => account.account_id)), lastError: warning,
+  }).where(eq(plaidConnections.kind, connection.kind));
+  return { selected: selected.length, warning };
 }
 
 function samePerson(a: string, b: string) {
@@ -195,6 +208,7 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
 export async function syncConnection(connection: Connection) {
   const token = await decrypt(connection.encryptedToken);
   const accountIds = new Set(JSON.parse(connection.accountIdsJson) as string[]);
+  if (!accountIds.size) throw new Error(`No eligible ${connection.kind} account is shared with Plaid. Use Reconnect to share an account.`);
   let imported = 0;
   try {
     let pages: SyncPage[] = [];

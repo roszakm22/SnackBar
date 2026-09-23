@@ -1,6 +1,6 @@
 import {
   connectItem, createLinkToken, disconnectPlaid, getPlaidConnection,
-  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, syncConnection,
+  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection,
   type PlaidKind,
 } from "../../../../lib/plaid";
 
@@ -44,12 +44,15 @@ export async function POST(request: Request) {
       if (!publicToken.startsWith("public-")) return Response.json({ error: "Invalid Plaid authorization." }, { status: 400 });
       const connected = await connectItem(kind, publicToken);
       const newConnection = await getPlaidConnection(kind);
-      if (newConnection) await syncConnection(newConnection);
+      if (newConnection && connected.accounts.length) await syncConnection(newConnection);
       return Response.json({ connected });
     }
     if (action === "reconnect_complete") {
       if (!connection) return Response.json({ error: "Connection not found." }, { status: 404 });
-      return Response.json({ reconnected: true, ...(await syncConnection(connection)) });
+      const refreshed = await refreshConnectedAccounts(connection);
+      const updated = await getPlaidConnection(kind);
+      return Response.json({ reconnected: true, warning: refreshed.warning,
+        ...(updated && refreshed.selected ? await syncConnection(updated) : {}) });
     }
     if (action === "sync") {
       if (!connection) return Response.json({ error: "Connection not found." }, { status: 404 });
