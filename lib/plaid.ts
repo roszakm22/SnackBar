@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { excludedKeys, plaidConnections, transactions } from "../db/schema";
 
@@ -127,6 +127,23 @@ function samePerson(a: string, b: string) {
   return a.toLowerCase().replace(/[^a-z0-9]/g, "") === b.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function venmoDescription(description: string) {
+  const match = description.trim().match(/^(.+?)\s+["“]([^"”]*)["”]\s*$/);
+  return match ? { name: match[1].trim(), note: match[2].trim() } : null;
+}
+
+async function repairPendingVenmoDescriptions() {
+  const db = getDb();
+  const rows = await db.select({ id: transactions.id, counterparty: transactions.counterparty, note: transactions.note })
+    .from(transactions).where(and(eq(transactions.source, "venmo"), eq(transactions.classification, "pending"), like(transactions.sourceKey, "plaid:%")));
+  for (const row of rows) {
+    const parsed = venmoDescription(row.counterparty);
+    if (parsed && row.note === row.counterparty) {
+      await db.update(transactions).set({ counterparty: parsed.name, note: parsed.note }).where(eq(transactions.id, row.id));
+    }
+  }
+}
+
 async function applyTransaction(connection: Connection, row: PlaidTransaction, accountIds: Set<string>) {
   if (!accountIds.has(row.account_id) || row.pending) return false;
   const venmo = connection.kind === "venmo";
@@ -144,12 +161,15 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
   const [excluded] = await db.select({ sourceKey: excludedKeys.sourceKey }).from(excludedKeys).where(eq(excludedKeys.sourceKey, sourceKey)).limit(1);
   if (excluded) return false;
   const [existing] = await db.select().from(transactions).where(eq(transactions.sourceKey, sourceKey)).limit(1);
-  const name = (row.original_description || row.name || row.merchant_name || "").trim().slice(0, 150);
+  const description = (row.original_description || row.name || row.merchant_name || "").trim();
+  const parsed = venmo ? venmoDescription(description) : null;
+  const name = (parsed?.name || description).slice(0, 150);
+  const note = venmo ? (parsed?.note || (row.name !== description ? row.name : "")) : row.name;
   const counterparty = !name || (venmo && /^venmo(?: payment| transfer)?$/i.test(name))
     ? (venmo ? "Unknown Venmo payer" : "Unknown Amex merchant") : name;
   if (existing) {
     if (existing.classification === "pending") {
-      await db.update(transactions).set({ amountCents, counterparty, note: row.name || "", occurredAt }).where(eq(transactions.id, existing.id));
+      await db.update(transactions).set({ amountCents, counterparty, note: note || "", occurredAt }).where(eq(transactions.id, existing.id));
     } else if (existing.amountCents !== amountCents) {
       throw new Error("A previously approved Plaid transaction changed; reconcile it manually with a statement.");
     }
@@ -166,7 +186,7 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
   await db.insert(transactions).values({
     id: crypto.randomUUID(), sourceKey, importBatchId: null, occurredAt, amountCents,
     source: connection.kind, direction: venmo ? "incoming" : "outgoing",
-    counterparty, note: row.name || "", originalType: "Plaid transaction", originalStatus: "Posted",
+    counterparty, note: note || "", originalType: "Plaid transaction", originalStatus: "Posted",
     classification: "pending", createdAt: new Date(), reviewedAt: null,
   }).onConflictDoNothing();
   return true;
@@ -206,6 +226,7 @@ export async function syncConnection(connection: Connection) {
       // Replaying a page after a partial failure is safe: source keys are unique.
       await db.update(plaidConnections).set({ cursor: page.next_cursor, lastSyncedAt: new Date(), lastError: null }).where(eq(plaidConnections.kind, connection.kind));
     }
+    if (connection.kind === "venmo") await repairPendingVenmoDescriptions();
     return { imported, pages: pages.length };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown sync error";
