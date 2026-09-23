@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gt, gte, inArray, like, lt, notLike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
+import { getCardSnapshot } from "../../../lib/card-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -92,51 +93,6 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
   ]).onConflictDoNothing();
 }
 
-async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Date()) {
-  const [lastAudit] = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
-  const [amexConnection] = await db.select({ kind: plaidConnections.kind }).from(plaidConnections).where(eq(plaidConnections.kind, "amex")).limit(1);
-  const usesAmexTransfers = Boolean(amexConnection);
-  if (!lastAudit) {
-    return { lastAudit: null, usesAmexTransfers, ledgerMovementCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
-  }
-  const since = lastAudit.checkedAt;
-  const movements = usesAmexTransfers ? await db
-    .select({ amountCents: transactions.amountCents })
-    .from(transactions)
-    .where(and(eq(transactions.classification, "card_transfer"), eq(transactions.source, "amex"), gt(transactions.occurredAt, since))) : await db
-    .select({ amountCents: transactions.amountCents })
-    .from(transactions)
-    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"),
-      or(
-        and(like(transactions.sourceKey, "plaid:%"), gt(transactions.reviewedAt, since)),
-        and(notLike(transactions.sourceKey, "plaid:%"), gt(transactions.occurredAt, since)),
-      )));
-  const otherDeposits = await db.select({ amountCents: transactions.amountCents }).from(transactions)
-    .where(and(eq(transactions.classification, "card_deposit"), eq(transactions.source, "amex"), gt(transactions.occurredAt, since)));
-  const adjustments = await db
-    .select({ amountCents: cardAdjustments.amountCents })
-    .from(cardAdjustments)
-    .where(gt(cardAdjustments.occurredAt, since));
-  const appliedOutflows = await db
-    .select({ amountCents: transactions.amountCents })
-    .from(cardOutflowApplications)
-    .innerJoin(transactions, eq(cardOutflowApplications.transactionId, transactions.id))
-    .where(gt(cardOutflowApplications.appliedAt, since));
-  const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
-  const otherDepositCents = otherDeposits.reduce((sum, row) => sum + row.amountCents, 0);
-  const adjustmentCents = adjustments.reduce((sum, row) => sum + row.amountCents, 0);
-  const cardOutflowCents = appliedOutflows.reduce((sum, row) => sum + row.amountCents, 0);
-  return {
-    lastAudit,
-    usesAmexTransfers,
-    ledgerMovementCents,
-    otherDepositCents,
-    adjustmentCents,
-    cardOutflowCents,
-    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + otherDepositCents + adjustmentCents + cardOutflowCents,
-    checkedAt,
-  };
-}
 
 export async function GET() {
   try {
@@ -155,6 +111,7 @@ export async function GET() {
     const appliedOutflows = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
     const appliedOutflowIds = new Set(appliedOutflows.map((row) => row.transactionId));
     const pendingCardOutflows = rows.filter((row) => row.classification === "snack_bar" && row.amountCents < 0 && !appliedOutflowIds.has(row.id));
+    const [amexBalance] = await db.select({ balanceCents: plaidConnections.balanceCents, balanceCheckedAt: plaidConnections.balanceCheckedAt }).from(plaidConnections).where(eq(plaidConnections.kind, "amex")).limit(1);
     const cardSnapshot = await getCardSnapshot(db);
     const now = new Date();
     const termAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() >= 6 ? 6 : 0, 1));
@@ -178,6 +135,9 @@ export async function GET() {
         adjustmentCents: cardSnapshot.adjustmentCents,
         cardOutflowCents: cardSnapshot.cardOutflowCents,
         hasBaseline: Boolean(cardSnapshot.lastAudit),
+        plaidBalanceCents: amexBalance?.balanceCents ?? null,
+        plaidBalanceCheckedAt: amexBalance?.balanceCheckedAt?.toISOString() ?? null,
+        awaitingReview: rows.some((row) => row.source === "amex" && row.classification === "pending") || pendingCardOutflows.length > 0,
         lastAudit: cardSnapshot.lastAudit ? { ...cardSnapshot.lastAudit, checkedAt: cardSnapshot.lastAudit.checkedAt.toISOString(), createdAt: cardSnapshot.lastAudit.createdAt.toISOString() } : null,
         history: audits.map((audit) => ({ ...audit, checkedAt: audit.checkedAt.toISOString(), createdAt: audit.createdAt.toISOString() })),
         adjustments: adjustments.map((adjustment) => ({ ...adjustment, occurredAt: adjustment.occurredAt.toISOString(), createdAt: adjustment.createdAt.toISOString() })),
@@ -356,7 +316,8 @@ export async function POST(request: Request) {
       const classification = body.classification === "snack_bar" ? "snack_bar"
         : body.classification === "personal" ? "personal"
         : body.classification === "card_transfer" ? "card_transfer"
-        : body.classification === "card_deposit" ? "card_deposit" : null;
+        : body.classification === "card_deposit" ? "card_deposit"
+        : body.classification === "card_confirmed" ? "card_confirmed" : null;
       if (!ids.length || !classification) return Response.json({ error: "Choose at least one transaction and a classification." }, { status: 400 });
       const revisedName = body.counterparty === undefined ? null : String(body.counterparty || "").trim().slice(0, 150);
       if (revisedName !== null && !revisedName) return Response.json({ error: "Enter a payer or merchant name." }, { status: 400 });
@@ -376,7 +337,7 @@ export async function POST(request: Request) {
           if (rows.some((row) => row.source === "amex" && row.amountCents > 0 && classification === "snack_bar")) {
             return Response.json({ error: "Classify Amex money in as a transfer or deposit, so it is not counted as another sale." }, { status: 400 });
           }
-          if ((classification === "card_transfer" || classification === "card_deposit") && rows.some((row) => row.source !== "amex" || row.amountCents <= 0)) {
+          if ((classification === "card_transfer" || classification === "card_deposit" || classification === "card_confirmed") && rows.some((row) => row.source !== "amex" || row.amountCents <= 0)) {
             return Response.json({ error: "Only incoming Amex transactions can be card transfers or deposits." }, { status: 400 });
           }
           if (rows.some((row) => row.source === "venmo" && row.sourceKey.startsWith("plaid:") && (revisedName || row.counterparty).toLowerCase().includes("unknown venmo payer"))) {

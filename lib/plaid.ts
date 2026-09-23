@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gte, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
-import { excludedKeys, plaidConnections, transactions } from "../db/schema";
+import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, transactions } from "../db/schema";
+import { getCardSnapshot } from "./card-audit";
 
 export type PlaidKind = "venmo" | "amex";
 type Connection = typeof plaidConnections.$inferSelect;
@@ -253,9 +254,46 @@ export async function syncPlaidConnections() {
   if (!plaidConfigured()) return;
   const connections = await getDb().select().from(plaidConnections);
   for (const connection of connections) {
-    try { await syncConnection(connection); }
+    try {
+      await syncConnection(connection);
+      if (connection.kind === "amex") await auditAmexBalance(connection);
+    }
     catch (error) { console.error(`Plaid ${connection.kind} sync failed:`, error instanceof Error ? error.message : error); }
   }
+}
+
+export async function auditAmexBalance(connection: Connection) {
+  if (connection.kind !== "amex") throw new Error("Only Amex checking can be audited automatically.");
+  const token = await decrypt(connection.encryptedToken);
+  const accounts = await plaidRequest<{ accounts: (PlaidAccount & { balances: { current: number | null } })[] }>("/accounts/balance/get", { access_token: token });
+  const selected = new Set(JSON.parse(connection.accountIdsJson) as string[]);
+  const checking = accounts.accounts.filter((account) => selected.has(account.account_id) && account.type === "depository" && account.subtype === "checking");
+  if (checking.length !== 1 || checking[0].balances.current === null) throw new Error("Select exactly one Amex checking account with a current balance for automatic audits.");
+  const balanceCents = Math.round(checking[0].balances.current! * 100);
+  if (!Number.isSafeInteger(balanceCents)) throw new Error("Plaid returned an invalid Amex checking balance.");
+  const db = getDb();
+  const now = new Date();
+  await db.update(plaidConnections).set({ balanceCents, balanceCheckedAt: now }).where(eq(plaidConnections.kind, "amex"));
+  const [pending] = await db.select({ id: transactions.id }).from(transactions)
+    .where(and(eq(transactions.source, "amex"), eq(transactions.classification, "pending"))).limit(1);
+  const expenses = await db.select({ id: transactions.id }).from(transactions)
+    .where(and(eq(transactions.classification, "snack_bar"), lt(transactions.amountCents, 0)));
+  const applied = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
+  if (pending || expenses.some((row) => !applied.some((item) => item.transactionId === row.id))) {
+    return { balanceCents, checkedAt: now.toISOString(), awaitingReview: true, audited: false };
+  }
+  const snapshot = await getCardSnapshot(db, now);
+  if (snapshot.lastAudit && snapshot.lastAudit.actualBalanceCents === balanceCents && snapshot.expectedBalanceCents === balanceCents) {
+    return { balanceCents, checkedAt: now.toISOString(), awaitingReview: false, audited: false };
+  }
+  await db.insert(cardAudits).values({
+    id: crypto.randomUUID(), checkedAt: now, actualBalanceCents: balanceCents,
+    expectedBalanceCents: snapshot.lastAudit ? snapshot.expectedBalanceCents : balanceCents,
+    varianceCents: snapshot.lastAudit ? balanceCents - snapshot.expectedBalanceCents : 0,
+    ledgerMovementCents: snapshot.lastAudit ? snapshot.ledgerMovementCents : 0,
+    source: "plaid", createdAt: now,
+  });
+  return { balanceCents, checkedAt: now.toISOString(), awaitingReview: false, audited: true };
 }
 
 export async function listPlaidConnections() {

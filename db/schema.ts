@@ -23,6 +23,8 @@ export const plaidConnections = sqliteTable("plaid_connections", {
   connectedAt: integer("connected_at", { mode: "timestamp_ms" }).notNull(),
   lastSyncedAt: integer("last_synced_at", { mode: "timestamp_ms" }),
   lastError: text("last_error"),
+  balanceCents: integer("balance_cents"),
+  balanceCheckedAt: integer("balance_checked_at", { mode: "timestamp_ms" }),
 });
 
 export const cashBoxEvents = sqliteTable(
@@ -51,6 +53,7 @@ export const cardAudits = sqliteTable(
     expectedBalanceCents: integer("expected_balance_cents").notNull(),
     varianceCents: integer("variance_cents").notNull(),
     ledgerMovementCents: integer("ledger_movement_cents").notNull(),
+    source: text("source", { enum: ["manual", "plaid"] }).notNull().default("manual"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("idx_card_audits_date").on(table.checkedAt)],
@@ -123,7 +126,7 @@ export const transactions = sqliteTable(
     note: text("note").notNull().default(""),
     originalType: text("original_type").notNull().default(""),
     originalStatus: text("original_status").notNull().default(""),
-    classification: text("classification", { enum: ["pending", "snack_bar", "personal", "card_transfer", "card_deposit"] }).notNull().default("pending"),
+    classification: text("classification", { enum: ["pending", "snack_bar", "personal", "card_transfer", "card_deposit", "card_confirmed"] }).notNull().default("pending"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
   },

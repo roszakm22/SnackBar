@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "08bd19e4-2be2-481a-8a3f-5f1744824a2d",
-  "prevId": "670d6ea3-afc6-4faf-9a92-edbd9c6ce155",
+  "id": "e5cea667-b36f-4692-9258-59861872385b",
+  "prevId": "08bd19e4-2be2-481a-8a3f-5f1744824a2d",
   "tables": {
     "card_adjustments": {
       "name": "card_adjustments",
@@ -102,6 +102,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'manual'"
         },
         "created_at": {
           "name": "created_at",
@@ -593,6 +601,20 @@
         "last_error": {
           "name": "last_error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "balance_cents": {
+          "name": "balance_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "balance_checked_at": {
+          "name": "balance_checked_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

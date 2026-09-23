@@ -215,3 +215,5 @@
 .plaid-error { color: #a64235; max-width: 28rem; }
 .review-name { display: grid; gap: .5rem; margin: 1rem 0; }
 @media (max-width: 680px) { .plaid-account { align-items: flex-start; flex-direction: column; } }
+
+[data-slot="tabs-content"][data-state="inactive"]{display:none!important}
