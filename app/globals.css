@@ -171,6 +171,14 @@
 .target-result.invalid,.target-result.unavailable{background:#58645e}
 .target-actions{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding-top:16px;border-top:1px solid #e0e5e1}
 .target-actions>span{color:#6c7770;font-size:12px}
+.goal-list{margin-top:20px}
+.goal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:14px 0 20px}
+.goal-tile{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-height:120px;padding:17px;text-align:left;background:#fff;border:1px solid #dce1dd;border-radius:13px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.goal-tile:hover,.goal-tile.selected{border-color:#356859;box-shadow:0 0 0 2px #e3efe8}
+.goal-tile.behind{border-top:4px solid #b9695d}.goal-tile.ahead,.goal-tile.reached{border-top:4px solid #356859}.goal-tile.on-pace{border-top:4px solid #9b7858}
+.goal-tile span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#64726a}
+.goal-tile strong{font-size:26px;color:#26312c}.goal-tile small{color:#6b766f}
+.goal-detail-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
 .checkpoint-panel{border-top:4px solid #7d8b84}
 .checkpoint-panel.ahead,.checkpoint-panel.reached{border-top-color:#356859}.checkpoint-panel.behind{border-top-color:#b9695d}.checkpoint-panel.on-pace{border-top-color:#9b7858}
 .checkpoint-panel>.panel-heading{align-items:flex-start}

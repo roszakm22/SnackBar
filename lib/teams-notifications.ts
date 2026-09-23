@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, asc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationEvents, teamsNotificationRuns, transactions } from "../db/schema";
 
@@ -56,7 +56,7 @@ async function dailyReviewMessage(now = new Date()) {
     db.select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents })
       .from(transactions).where(eq(transactions.classification, "snack_bar")),
     db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1),
-    db.select().from(forecastCheckpoints).where(eq(forecastCheckpoints.id, "active")).limit(1),
+    db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt)).limit(1),
     db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1),
   ]);
   const today = dateKey(now);

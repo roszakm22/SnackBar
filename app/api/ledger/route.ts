@@ -99,7 +99,7 @@ export async function GET() {
     const db = getDb();
     const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
     const [savedForecastSettings] = await db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1);
-    const [savedForecastCheckpoint] = await db.select().from(forecastCheckpoints).where(eq(forecastCheckpoints.id, "active")).limit(1);
+    const savedForecastCheckpoints = await db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt));
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
@@ -148,7 +148,8 @@ export async function GET() {
         closures: parseClosures(savedForecastSettings?.closuresJson || "[]"),
         updatedAt: savedForecastSettings?.updatedAt.toISOString() || null,
       },
-      forecastCheckpoint: savedForecastCheckpoint ? {
+      forecastCheckpoints: savedForecastCheckpoints.map((savedForecastCheckpoint) => ({
+        id: savedForecastCheckpoint.id,
         targetCents: savedForecastCheckpoint.targetCents,
         startingBalanceCents: savedForecastCheckpoint.startingBalanceCents,
         dailyRevenueCents: savedForecastCheckpoint.dailyRevenueCents,
@@ -161,7 +162,7 @@ export async function GET() {
         projectedDate: savedForecastCheckpoint.projectedDate,
         closures: parseClosures(savedForecastCheckpoint.closuresJson),
         createdAt: savedForecastCheckpoint.createdAt.toISOString(),
-      } : null,
+      })),
     });
   } catch (error) {
     return errorResponse(error);
@@ -213,9 +214,15 @@ export async function POST(request: Request) {
         if (validDateKey(start) && validDateKey(end) && end >= start) closures.push({ id: String(row.id || crypto.randomUUID()), label: String(row.label || "").trim().slice(0, 80), start, end });
       }
       const createdAt = new Date();
-      await db.insert(forecastCheckpoints).values({ id: "active", targetCents, startingBalanceCents, dailyRevenueCents, weekdayPacesJson: JSON.stringify(weekdayPaces), projectedDate, closuresJson: JSON.stringify(closures), createdAt })
-        .onConflictDoUpdate({ target: forecastCheckpoints.id, set: { targetCents, startingBalanceCents, dailyRevenueCents, weekdayPacesJson: JSON.stringify(weekdayPaces), projectedDate, closuresJson: JSON.stringify(closures), createdAt } });
+      await db.insert(forecastCheckpoints).values({ id: crypto.randomUUID(), targetCents, startingBalanceCents, dailyRevenueCents, weekdayPacesJson: JSON.stringify(weekdayPaces), projectedDate, closuresJson: JSON.stringify(closures), createdAt });
       return Response.json({ saved: true, createdAt: createdAt.toISOString() });
+    }
+
+    if (action === "forecast_checkpoint_delete") {
+      const id = String(body.id || "");
+      if (!id) return Response.json({ error: "Choose a tracked goal." }, { status: 400 });
+      await db.delete(forecastCheckpoints).where(eq(forecastCheckpoints.id, id));
+      return Response.json({ deleted: true });
     }
 
     if (action === "finalize_awards_month") {
