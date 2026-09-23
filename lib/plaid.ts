@@ -22,17 +22,24 @@ function settings() {
   const tokenKey = variables.PLAID_TOKEN_KEY;
   const redirectUri = variables.PLAID_REDIRECT_URI;
   const environment = variables.PLAID_ENV === "sandbox" ? "sandbox" : "production";
-  if (!clientId || !secret || !tokenKey || !redirectUri) {
-    throw new Error("Set PLAID_CLIENT_ID, PLAID_SECRET, PLAID_TOKEN_KEY, and PLAID_REDIRECT_URI as Worker secrets.");
+  const issues = plaidConfigurationIssues();
+  if (issues.length) throw new Error(issues.join(" "));
+  return { clientId: clientId!, secret: secret!, tokenKey: tokenKey!, redirectUri: redirectUri!, environment };
+}
+
+export function plaidConfigurationIssues() {
+  const variables = env as unknown as Record<string, string | undefined>;
+  const issues = ["PLAID_CLIENT_ID", "PLAID_SECRET", "PLAID_TOKEN_KEY", "PLAID_REDIRECT_URI"]
+    .filter((name) => !variables[name]?.trim()).map((name) => `${name} is missing from this Worker.`);
+  const redirectUri = variables.PLAID_REDIRECT_URI;
+  if (redirectUri && !/^https:\/\/[^?#]+$/.test(redirectUri) && !(variables.PLAID_ENV === "sandbox" && /^http:\/\/localhost(:\d+)?\/[^?#]+$/.test(redirectUri))) {
+    issues.push("PLAID_REDIRECT_URI must be an HTTPS URL without a query string.");
   }
-  if (!/^https:\/\/[^?#]+$/.test(redirectUri) && !(environment === "sandbox" && /^http:\/\/localhost(:\d+)?\/[^?#]+$/.test(redirectUri))) {
-    throw new Error("PLAID_REDIRECT_URI must be an HTTPS URL without a query string.");
-  }
-  return { clientId, secret, tokenKey, redirectUri, environment };
+  return issues;
 }
 
 export function plaidConfigured() {
-  try { settings(); return true; } catch { return false; }
+  return plaidConfigurationIssues().length === 0;
 }
 
 export async function plaidRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {

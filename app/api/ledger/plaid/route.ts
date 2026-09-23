@@ -1,6 +1,6 @@
 import {
   connectItem, createLinkToken, disconnectPlaid, getPlaidConnection,
-  listPlaidConnections, plaidConfigured, plaidRedirectUri, syncConnection,
+  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, syncConnection,
   type PlaidKind,
 } from "../../../../lib/plaid";
 
@@ -12,7 +12,7 @@ function kindOf(value: unknown): PlaidKind | null {
 
 export async function GET() {
   try {
-    return Response.json({ configured: plaidConfigured(), connections: await listPlaidConnections() });
+    return Response.json({ configured: plaidConfigured(), configurationIssues: plaidConfigurationIssues(), connections: await listPlaidConnections() });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not load Plaid connections." }, { status: 500 });
   }
