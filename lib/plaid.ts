@@ -259,9 +259,9 @@ export async function syncConnection(connection: Connection) {
 }
 
 export async function plaidTransactionsLastUpdated(connection: Connection) {
-  const result = await plaidRequest<{ item: { status?: { transactions?: { last_successful_update?: string | null; last_failed_update?: string | null } } } }>(
+  const result = await plaidRequest<{ status?: { transactions?: { last_successful_update?: string | null; last_failed_update?: string | null } } }>(
     "/item/get", { access_token: await decrypt(connection.encryptedToken) });
-  return result.item.status?.transactions ?? null;
+  return result.status?.transactions ?? null;
 }
 
 export async function syncPlaidConnections() {
