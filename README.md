@@ -89,7 +89,7 @@ SnackBar can send a private Teams chat message when Plaid imports new Venmo paym
 
    In **If no**, add another **Post a message in a chat or channel** action with only the parsed `text` dynamic content. This handles both the test message and grouped Venmo alerts.
 4. Save the flow, copy its webhook URL, and add it in Cloudflare to the production `snackbar-ledger` Worker as an **encrypted secret** named `TEAMS_FLOW_URL`. Treat the URL like a password; never put it in GitHub or a screenshot.
-5. Open **Connections** in SnackBar and select **Send report now** to check formatting; use **Send test message** to check the other branch. If the webhook accepts the request but the chat has no message, inspect the flow's run history and the Teams action.
+5. Open **Connections** in SnackBar and select **Send report now** to check formatting. The other branch handles new Venmo payment alerts. If the webhook accepts the request but the chat has no message, inspect the flow's run history and the Teams action.
 
 The four-hour Plaid sync stays in place. A separate ten-minute cron dispatches grouped notifications; setting the secret enables both alerts without reconnecting Venmo or Amex. If the flow fails, unsent payment alerts retry on later cron runs. Remove the secret to pause notifications.
 
