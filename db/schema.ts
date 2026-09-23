@@ -123,7 +123,7 @@ export const transactions = sqliteTable(
     note: text("note").notNull().default(""),
     originalType: text("original_type").notNull().default(""),
     originalStatus: text("original_status").notNull().default(""),
-    classification: text("classification", { enum: ["pending", "snack_bar", "personal"] }).notNull().default("pending"),
+    classification: text("classification", { enum: ["pending", "snack_bar", "personal", "card_transfer", "card_deposit"] }).notNull().default("pending"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
   },

@@ -163,7 +163,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   return (
     <section className="panel plaid-panel">
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
-        <p>Plaid checks for posted activity; SnackBar syncs every four hours. New Venmo receipts and Amex charges wait for your review.</p></div></div>
+        <p>Plaid checks for posted activity; SnackBar syncs every four hours. Venmo payments and Amex deposits and purchases wait for your review.</p></div></div>
       {!configured && <p>To enable connections, add the Plaid Worker secrets and redirect URL described in the repository README.</p>}
       {(["venmo", "amex"] as Kind[]).map((kind) => {
         const connection = connections.find((item) => item.kind === kind);

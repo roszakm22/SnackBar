@@ -94,11 +94,16 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
 
 async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Date()) {
   const [lastAudit] = await db.select().from(cardAudits).orderBy(desc(cardAudits.checkedAt)).limit(1);
+  const [amexConnection] = await db.select({ kind: plaidConnections.kind }).from(plaidConnections).where(eq(plaidConnections.kind, "amex")).limit(1);
+  const usesAmexTransfers = Boolean(amexConnection);
   if (!lastAudit) {
-    return { lastAudit: null, ledgerMovementCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
+    return { lastAudit: null, usesAmexTransfers, ledgerMovementCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
   }
   const since = lastAudit.checkedAt;
-  const movements = await db
+  const movements = usesAmexTransfers ? await db
+    .select({ amountCents: transactions.amountCents })
+    .from(transactions)
+    .where(and(eq(transactions.classification, "card_transfer"), eq(transactions.source, "amex"), gt(transactions.occurredAt, since))) : await db
     .select({ amountCents: transactions.amountCents })
     .from(transactions)
     .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"),
@@ -106,6 +111,8 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
         and(like(transactions.sourceKey, "plaid:%"), gt(transactions.reviewedAt, since)),
         and(notLike(transactions.sourceKey, "plaid:%"), gt(transactions.occurredAt, since)),
       )));
+  const otherDeposits = await db.select({ amountCents: transactions.amountCents }).from(transactions)
+    .where(and(eq(transactions.classification, "card_deposit"), eq(transactions.source, "amex"), gt(transactions.occurredAt, since)));
   const adjustments = await db
     .select({ amountCents: cardAdjustments.amountCents })
     .from(cardAdjustments)
@@ -116,14 +123,17 @@ async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = new Dat
     .innerJoin(transactions, eq(cardOutflowApplications.transactionId, transactions.id))
     .where(gt(cardOutflowApplications.appliedAt, since));
   const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
+  const otherDepositCents = otherDeposits.reduce((sum, row) => sum + row.amountCents, 0);
   const adjustmentCents = adjustments.reduce((sum, row) => sum + row.amountCents, 0);
   const cardOutflowCents = appliedOutflows.reduce((sum, row) => sum + row.amountCents, 0);
   return {
     lastAudit,
+    usesAmexTransfers,
     ledgerMovementCents,
+    otherDepositCents,
     adjustmentCents,
     cardOutflowCents,
-    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + adjustmentCents + cardOutflowCents,
+    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + otherDepositCents + adjustmentCents + cardOutflowCents,
     checkedAt,
   };
 }
@@ -162,7 +172,9 @@ export async function GET() {
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
       cardAudit: {
         expectedBalanceCents: cardSnapshot.expectedBalanceCents,
+        usesAmexTransfers: cardSnapshot.usesAmexTransfers,
         ledgerMovementCents: cardSnapshot.ledgerMovementCents,
+        otherDepositCents: cardSnapshot.otherDepositCents,
         adjustmentCents: cardSnapshot.adjustmentCents,
         cardOutflowCents: cardSnapshot.cardOutflowCents,
         hasBaseline: Boolean(cardSnapshot.lastAudit),
@@ -341,7 +353,10 @@ export async function POST(request: Request) {
 
     if (action === "review") {
       const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 250) : [];
-      const classification = body.classification === "snack_bar" ? "snack_bar" : body.classification === "personal" ? "personal" : null;
+      const classification = body.classification === "snack_bar" ? "snack_bar"
+        : body.classification === "personal" ? "personal"
+        : body.classification === "card_transfer" ? "card_transfer"
+        : body.classification === "card_deposit" ? "card_deposit" : null;
       if (!ids.length || !classification) return Response.json({ error: "Choose at least one transaction and a classification." }, { status: 400 });
       const revisedName = body.counterparty === undefined ? null : String(body.counterparty || "").trim().slice(0, 150);
       if (revisedName !== null && !revisedName) return Response.json({ error: "Enter a payer or merchant name." }, { status: 400 });
@@ -358,14 +373,16 @@ export async function POST(request: Request) {
         for (let index = 0; index < ids.length; index += 75) {
           const chunk = ids.slice(index, index + 75);
           const rows = await db.select().from(transactions).where(and(inArray(transactions.id, chunk), eq(transactions.classification, "pending")));
+          if (rows.some((row) => row.source === "amex" && row.amountCents > 0 && classification === "snack_bar")) {
+            return Response.json({ error: "Classify Amex money in as a transfer or deposit, so it is not counted as another sale." }, { status: 400 });
+          }
+          if ((classification === "card_transfer" || classification === "card_deposit") && rows.some((row) => row.source !== "amex" || row.amountCents <= 0)) {
+            return Response.json({ error: "Only incoming Amex transactions can be card transfers or deposits." }, { status: 400 });
+          }
           if (rows.some((row) => row.source === "venmo" && row.sourceKey.startsWith("plaid:") && (revisedName || row.counterparty).toLowerCase().includes("unknown venmo payer"))) {
             return Response.json({ error: "Enter the real payer name before approving this Venmo payment." }, { status: 400 });
           }
           await db.update(transactions).set({ classification, reviewedAt: new Date(), ...(revisedName && ids.length === 1 ? { counterparty: revisedName } : {}) }).where(and(inArray(transactions.id, chunk), eq(transactions.classification, "pending")));
-          const amexRows = rows.filter((row) => row.source === "amex" && row.amountCents < 0);
-          if (amexRows.length) await db.insert(cardOutflowApplications).values(amexRows.map((row) => ({
-            id: crypto.randomUUID(), transactionId: row.id, appliedAt: new Date(), createdAt: new Date(),
-          }))).onConflictDoNothing({ target: cardOutflowApplications.transactionId });
         }
       }
       return Response.json({ updated: ids.length });

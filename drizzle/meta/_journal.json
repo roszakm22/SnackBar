@@ -71,6 +71,13 @@
       "when": 1790176092892,
       "tag": "0009_early_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790180694724,
+      "tag": "0010_replay_amex_credits",
+      "breakpoints": true
     }
   ]
 }

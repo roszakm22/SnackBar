@@ -161,7 +161,7 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
   if (!accountIds.has(row.account_id) || row.pending) return false;
   const venmo = connection.kind === "venmo";
   // Plaid amounts are positive when money leaves the account.
-  if (venmo ? row.amount >= 0 : row.amount <= 0) return false;
+  if (venmo && row.amount >= 0) return false;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) return false;
   const amountCents = Math.round(-row.amount * 100);
   if (!Number.isSafeInteger(amountCents) || amountCents === 0) return false;
@@ -198,7 +198,7 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
   }
   await db.insert(transactions).values({
     id: crypto.randomUUID(), sourceKey, importBatchId: null, occurredAt, amountCents,
-    source: connection.kind, direction: venmo ? "incoming" : "outgoing",
+    source: connection.kind, direction: venmo || amountCents > 0 ? "incoming" : "outgoing",
     counterparty, note: note || "", originalType: "Plaid transaction", originalStatus: "Posted",
     classification: "pending", createdAt: new Date(), reviewedAt: null,
   }).onConflictDoNothing();
