@@ -16,7 +16,8 @@ async function send(message: string, url: string) {
   if (endpoint.protocol !== "https:") throw new Error("TEAMS_FLOW_URL must use HTTPS.");
   const response = await fetch(endpoint, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: message }), signal: AbortSignal.timeout(20_000),
+    body: JSON.stringify({ "@type": "MessageCard", "@context": "https://schema.org/extensions", summary: "SnackBar notification", text: message }),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`Teams workflow returned HTTP ${response.status}.`);
 }

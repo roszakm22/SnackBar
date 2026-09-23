@@ -47,7 +47,7 @@ The Worker has a Cron Trigger every four hours to fetch posted transactions. The
 SnackBar can send a private Teams chat message when Plaid imports new Venmo payments. Payments imported together are grouped after ten minutes. It also sends a daily count of pending Venmo and Amex transactions at 5 PM America/Chicago (including days with zero pending). Messages contain counts only, with no payer names, notes, amounts, or card balances. They start only after configuration and do not backfill older transactions.
 
 1. In Power Automate or Teams Workflows, create a flow using **When a Teams webhook request is received**. For a secret URL managed only by you, choose its **Anyone** authentication option; do not share the URL.
-2. Add **Post a message in a chat or channel**. Choose **Chat with Flow bot** and yourself as recipient. Set the message body to the trigger's `text` field; if it is not offered as dynamic content, use the expression `triggerBody()?['text']`.
+2. Add **Post a message in a chat or channel**. Choose **Chat with Flow bot** and yourself as recipient. Set the message body to the trigger's `text` field; if it is not offered as dynamic content, use the expression `triggerBody()?['text']`. SnackBar sends a Message Card JSON body with `@type`, `@context`, `summary`, and `text` fields.
 3. Save the flow, copy its webhook URL, and add it in Cloudflare to the production `snackbar-ledger` Worker as an **encrypted secret** named `TEAMS_FLOW_URL`. Treat the URL like a password; never put it in GitHub or a screenshot.
 4. Open **Connections** in SnackBar and select **Send test message**. If the webhook accepts the test but the chat has no message, inspect the flow's run history and the Teams action.
 
