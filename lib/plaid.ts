@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gte, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
-import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, transactions } from "../db/schema";
+import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, teamsNotificationEvents, transactions } from "../db/schema";
 import { getCardSnapshot } from "./card-audit";
 
 export type PlaidKind = "venmo" | "amex";
@@ -197,12 +197,14 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
       .from(transactions).where(and(eq(transactions.source, "venmo"), gte(transactions.occurredAt, dayStart), lt(transactions.occurredAt, dayEnd)));
     if (candidates.some((item) => item.amountCents === amountCents && samePerson(item.counterparty, counterparty))) return false;
   }
+  const id = crypto.randomUUID();
   await db.insert(transactions).values({
-    id: crypto.randomUUID(), sourceKey, importBatchId: null, occurredAt, amountCents,
+    id, sourceKey, importBatchId: null, occurredAt, amountCents,
     source: connection.kind, direction: venmo || amountCents > 0 ? "incoming" : "outgoing",
     counterparty, note: note || "", originalType: "Plaid transaction", originalStatus: "Posted",
     classification: "pending", createdAt: new Date(), reviewedAt: null,
   }).onConflictDoNothing();
+  if (venmo) await db.insert(teamsNotificationEvents).values({ transactionId: id, queuedAt: new Date() }).onConflictDoNothing();
   return true;
 }
 

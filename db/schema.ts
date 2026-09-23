@@ -14,6 +14,17 @@ export const excludedKeys = sqliteTable("excluded_keys", {
   excludedAt: integer("excluded_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const teamsNotificationEvents = sqliteTable("teams_notification_events", {
+  transactionId: text("transaction_id").primaryKey().references(() => transactions.id, { onDelete: "cascade" }),
+  queuedAt: integer("queued_at", { mode: "timestamp_ms" }).notNull(),
+  deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+});
+
+export const teamsNotificationRuns = sqliteTable("teams_notification_runs", {
+  id: text("id").primaryKey(),
+  deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const plaidConnections = sqliteTable("plaid_connections", {
   kind: text("kind", { enum: ["venmo", "amex"] }).primaryKey(),
   itemId: text("item_id").notNull(),

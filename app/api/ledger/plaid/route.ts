@@ -3,6 +3,7 @@ import {
   listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, auditAmexBalance, plaidTransactionsLastUpdated,
   type PlaidKind,
 } from "../../../../lib/plaid";
+import { sendTeamsTest, teamsConfigured } from "../../../../lib/teams-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ function kindOf(value: unknown): PlaidKind | null {
 
 export async function GET() {
   try {
-    return Response.json({ configured: plaidConfigured(), configurationIssues: plaidConfigurationIssues(), connections: await listPlaidConnections() });
+    return Response.json({ configured: plaidConfigured(), configurationIssues: plaidConfigurationIssues(), connections: await listPlaidConnections(), teamsConfigured: teamsConfigured() });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not load Plaid connections." }, { status: 500 });
   }
@@ -25,6 +26,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "This action must come from the manager page." }, { status: 403 });
     }
     const body = await request.json() as Record<string, unknown>;
+    if (body.action === "teams_test") {
+      await sendTeamsTest();
+      return Response.json({ sent: true });
+    }
     const kind = kindOf(body.kind);
     if (!kind) return Response.json({ error: "Choose Venmo or Amex." }, { status: 400 });
     const action = String(body.action || "");

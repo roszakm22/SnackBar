@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { syncPlaidConnections } from "../lib/plaid";
+import { sendTeamsNotifications } from "../lib/teams-notifications";
 
 interface Env {
   ASSETS: Fetcher;
@@ -43,8 +44,9 @@ const worker = {
 
     return handler.fetch(request, env, ctx);
   },
-  async scheduled(_event: unknown, _env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(syncPlaidConnections());
+  async scheduled(event: { cron: string }, _env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === "0 */4 * * *") ctx.waitUntil(syncPlaidConnections());
+    if (event.cron === "*/10 * * * *") ctx.waitUntil(sendTeamsNotifications());
   },
 };
 
