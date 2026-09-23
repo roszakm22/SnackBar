@@ -296,13 +296,18 @@ export async function auditAmexBalance(connection: Connection) {
   await db.update(plaidConnections).set({ balanceCents, balanceCheckedAt: now }).where(eq(plaidConnections.kind, "amex"));
   const [pending] = await db.select({ id: transactions.id }).from(transactions)
     .where(and(eq(transactions.source, "amex"), eq(transactions.classification, "pending"))).limit(1);
+  const [pendingVenmo] = await db.select({ id: transactions.id }).from(transactions)
+    .where(and(eq(transactions.source, "venmo"), eq(transactions.classification, "pending"))).limit(1);
   const expenses = await db.select({ id: transactions.id }).from(transactions)
     .where(and(eq(transactions.classification, "snack_bar"), lt(transactions.amountCents, 0)));
   const applied = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
-  if (pending || expenses.some((row) => !applied.some((item) => item.transactionId === row.id))) {
+  if (pending || pendingVenmo || expenses.some((row) => !applied.some((item) => item.transactionId === row.id))) {
     return { balanceCents, checkedAt: now.toISOString(), awaitingReview: true, audited: false };
   }
   const snapshot = await getCardSnapshot(db, now);
+  if (snapshot.untransferredVenmoCents > 0) {
+    return { balanceCents, checkedAt: now.toISOString(), awaitingReview: false, awaitingTransfer: true, untransferredVenmoCents: snapshot.untransferredVenmoCents, audited: false };
+  }
   if (snapshot.lastAudit && snapshot.lastAudit.actualBalanceCents === balanceCents && snapshot.expectedBalanceCents === balanceCents) {
     return { balanceCents, checkedAt: now.toISOString(), awaitingReview: false, audited: false };
   }

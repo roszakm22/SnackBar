@@ -7,7 +7,7 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
   const [amexConnection] = await db.select({ kind: plaidConnections.kind }).from(plaidConnections).where(eq(plaidConnections.kind, "amex")).limit(1);
   const usesAmexTransfers = Boolean(amexConnection);
   if (!lastAudit) {
-    return { lastAudit: null, usesAmexTransfers, ledgerMovementCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
+    return { lastAudit: null, usesAmexTransfers, ledgerMovementCents: 0, untransferredVenmoCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, expectedBalanceCents: 0, checkedAt };
   }
   const since = lastAudit.checkedAt;
   const movements = usesAmexTransfers ? await db
@@ -33,6 +33,11 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
     .innerJoin(transactions, eq(cardOutflowApplications.transactionId, transactions.id))
     .where(gt(cardOutflowApplications.appliedAt, since));
   const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
+  const venmoSales = usesAmexTransfers ? await db.select({ amountCents: transactions.amountCents }).from(transactions)
+    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"), gt(transactions.occurredAt, since))) : [];
+  const untransferredVenmoCents = usesAmexTransfers
+    ? Math.max(0, venmoSales.reduce((sum, row) => sum + row.amountCents, 0) - ledgerMovementCents)
+    : 0;
   const otherDepositCents = otherDeposits.reduce((sum, row) => sum + row.amountCents, 0);
   const adjustmentCents = adjustments.reduce((sum, row) => sum + row.amountCents, 0);
   const cardOutflowCents = appliedOutflows.reduce((sum, row) => sum + row.amountCents, 0);
@@ -40,6 +45,7 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
     lastAudit,
     usesAmexTransfers,
     ledgerMovementCents,
+    untransferredVenmoCents,
     otherDepositCents,
     adjustmentCents,
     cardOutflowCents,
