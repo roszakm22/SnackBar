@@ -3,7 +3,7 @@ import {
   listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, auditAmexBalance, plaidTransactionsLastUpdated,
   type PlaidKind,
 } from "../../../../lib/plaid";
-import { sendTeamsReportNow, sendTeamsTest, teamsConfigured } from "../../../../lib/teams-notifications";
+import { sendTeamsReportNow, teamsConfigured } from "../../../../lib/teams-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +26,6 @@ export async function POST(request: Request) {
       return Response.json({ error: "This action must come from the manager page." }, { status: 403 });
     }
     const body = await request.json() as Record<string, unknown>;
-    if (body.action === "teams_test") {
-      await sendTeamsTest();
-      return Response.json({ sent: true });
-    }
     if (body.action === "teams_report_now") {
       await sendTeamsReportNow();
       return Response.json({ sent: true });

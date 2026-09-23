@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationEvents, teamsNotificationRuns, transactions } from "../db/schema";
+import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
 
 function chicagoTime(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -40,12 +40,6 @@ async function send(content: string | TeamsContent, url: string) {
 
 export function teamsConfigured() {
   return Boolean((env as unknown as Record<string, string | undefined>).TEAMS_FLOW_URL?.trim());
-}
-
-export async function sendTeamsTest() {
-  const url = (env as unknown as Record<string, string | undefined>).TEAMS_FLOW_URL?.trim();
-  if (!url) throw new Error("Add TEAMS_FLOW_URL as an encrypted Worker secret first.");
-  await send("SnackBar: Teams notifications are connected. New Venmo payments and the daily review summary will appear here.", url);
 }
 
 async function dailyReviewMessage(now = new Date()) {
@@ -141,18 +135,6 @@ export async function sendTeamsNotifications(now = new Date()) {
   if (!url) return;
   const db = getDb();
   try {
-    // A ten-minute window groups payments imported during the same sync into one alert.
-    const queued = await db.select({ transactionId: teamsNotificationEvents.transactionId }).from(teamsNotificationEvents)
-      .where(and(isNull(teamsNotificationEvents.deliveredAt), lte(teamsNotificationEvents.queuedAt, new Date(now.getTime() - 600_000))))
-      .limit(500);
-    if (queued.length) {
-      const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(transactions)
-        .where(and(eq(transactions.source, "venmo"), eq(transactions.classification, "pending")));
-      await send(`SnackBar: ${queued.length} new Venmo payment${queued.length === 1 ? "" : "s"} imported. ${Number(count)} Venmo payment${Number(count) === 1 ? "" : "s"} waiting for review.`, url);
-      await db.update(teamsNotificationEvents).set({ deliveredAt: now })
-        .where(inArray(teamsNotificationEvents.transactionId, queued.map((row) => row.transactionId)));
-    }
-
     const local = chicagoTime(now);
     if (local.hour === 17) {
       const id = `daily:${local.date}`;
@@ -162,7 +144,6 @@ export async function sendTeamsNotifications(now = new Date()) {
         await db.insert(teamsNotificationRuns).values({ id, deliveredAt: now }).onConflictDoNothing();
       }
     }
-    await db.delete(teamsNotificationEvents).where(and(lt(teamsNotificationEvents.deliveredAt, new Date(now.getTime() - 30 * 86_400_000))));
   } catch (error) {
     console.error("SnackBar Teams notification failed:", error instanceof Error ? error.message : error);
   }

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gte, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
-import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, teamsNotificationEvents, transactions } from "../db/schema";
+import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, transactions } from "../db/schema";
 import { getCardSnapshot } from "./card-audit";
 
 export type PlaidKind = "venmo" | "amex";
@@ -204,7 +204,6 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
     counterparty, note: note || "", originalType: "Plaid transaction", originalStatus: "Posted",
     classification: "pending", createdAt: new Date(), reviewedAt: null,
   }).onConflictDoNothing();
-  if (venmo) await db.insert(teamsNotificationEvents).values({ transactionId: id, queuedAt: new Date() }).onConflictDoNothing();
   return true;
 }
 

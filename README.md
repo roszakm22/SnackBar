@@ -44,7 +44,7 @@ The Worker has a Cron Trigger every four hours to fetch posted transactions. The
 
 ### Teams notifications
 
-SnackBar can send a private Teams chat message when Plaid imports new Venmo payments. Payments imported together are grouped after ten minutes. It also sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains approved revenue, expenses, operating balance, outlook, and review counts. It does not include payer names or notes. Alerts start only after configuration and do not backfill older transactions.
+SnackBar sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains approved revenue, expenses, operating balance, outlook, and review counts. It does not include payer names or notes. The report starts only after configuration.
 
 1. In Power Automate or Teams Workflows, create a flow using **When a Teams webhook request is received**. For a secret URL managed only by you, choose its **Anyone** authentication option; do not share the URL.
 2. Add **Parse JSON** with Content set using the `triggerBody()` expression. Paste the schema below. Do not include the Message Card `@type` or `@context` fields in the schema; Power Automate's editor interprets keys starting with `@` as expressions.
@@ -69,7 +69,7 @@ SnackBar can send a private Teams chat message when Plaid imports new Venmo paym
    }
    ```
 
-3. Add a **Condition**: parsed `kind` **is equal to** `report`. In **If yes**, add **Post a message in a chat or channel** as Flow bot to yourself. Enter the following as separate paragraphs in its Message editor, inserting each value as **Dynamic content** from Parse JSON (do not paste expressions as plain text):
+3. Add **Post a message in a chat or channel** as Flow bot to yourself. Enter the following as separate paragraphs in its Message editor, inserting each value as **Dynamic content** from Parse JSON (do not paste expressions as plain text):
 
    **[title]**
 
@@ -87,11 +87,10 @@ SnackBar can send a private Teams chat message when Plaid imports new Venmo paym
    **Review queue**  
    [review]
 
-   In **If no**, add another **Post a message in a chat or channel** action with only the parsed `text` dynamic content. This handles both the test message and grouped Venmo alerts.
 4. Save the flow, copy its webhook URL, and add it in Cloudflare to the production `snackbar-ledger` Worker as an **encrypted secret** named `TEAMS_FLOW_URL`. Treat the URL like a password; never put it in GitHub or a screenshot.
-5. Open **Connections** in SnackBar and select **Send report now** to check formatting. The other branch handles new Venmo payment alerts. If the webhook accepts the request but the chat has no message, inspect the flow's run history and the Teams action.
+5. Open **Connections** in SnackBar and select **Send report now** to check formatting. If the webhook accepts the request but the chat has no message, inspect the flow's run history and the Teams action.
 
-The four-hour Plaid sync stays in place. A separate ten-minute cron dispatches grouped notifications; setting the secret enables both alerts without reconnecting Venmo or Amex. If the flow fails, unsent payment alerts retry on later cron runs. Remove the secret to pause notifications.
+The four-hour Plaid sync stays in place. A separate ten-minute cron checks for the 5 PM report. Remove the secret to pause the report.
 
 Venmo's Plaid descriptions may not include the payer's name. Check and edit each name in the review queue before approving it; missing names are blocked from approval. Amex checking deposits enter review as either Venmo transfers or other deposits; neither counts as another sale. Confirmed deposits update the card audit. Amex purchases enter review as expenses and, once approved, wait under **Expenses waiting to post** until you apply them to the card audit. When Amex is connected, the audit uses confirmed Amex transfers instead of Venmo sales to track money reaching the account. If a cash-to-card transfer was already recorded manually, choose **Already recorded cash transfer** on the matching Amex credit so it is not counted twice. Check for duplicate manual deposits and expenses before applying imported activity. After each scheduled sync (or **Refresh Amex balance**), Plaid reads the existing Amex checking connection’s current posted balance and creates an automatic card audit when no Amex items or approved expenses remain to review. The first eligible balance sets the baseline; you can still enter a manual balance if Plaid Balance is unavailable. Outgoing Venmo transfers are ignored; incoming Amex refunds must be classified in review. CSV import still works for historical dates before Venmo was connected; overlapping CSVs are blocked to avoid double-counting. To close a month when using Plaid, review all of its Venmo payments and then use **Finalize awards** in Connections. Verify the last Plaid sync before closing, because late posted transactions cannot be included after an award month is finalized.
 

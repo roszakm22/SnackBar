@@ -179,7 +179,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
         <p>Plaid checks for posted activity; SnackBar syncs every four hours. Venmo payments and Amex deposits and purchases wait for your review.</p></div></div>
       {!configured && <p>To enable connections, add the Plaid Worker secrets and redirect URL described in the repository README.</p>}
-      <div className="plaid-account"><div><strong>Teams alerts</strong><span>{teamsReady ? "Configured · New Venmo alerts and 5 PM Chicago daily metrics reports" : "Add the TEAMS_FLOW_URL Worker secret to enable alerts"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
+      <div className="plaid-account"><div><strong>Teams report</strong><span>{teamsReady ? "Configured · Daily metrics report at 5 PM Chicago time" : "Add the TEAMS_FLOW_URL Worker secret to enable the report"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
       {(["venmo", "amex"] as Kind[]).map((kind) => {
         const connection = connections.find((item) => item.kind === kind);
         return <div className="plaid-account" key={kind}>
