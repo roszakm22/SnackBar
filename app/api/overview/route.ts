@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAudits, cashBoxEvents, importBatches, outlookTargets, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cashBoxEvents, importBatches, outlookTargets, transactions } from "../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +22,11 @@ export async function GET(request: Request) {
       .orderBy(asc(transactions.occurredAt))
       .limit(10000);
 
-    const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
+    const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; capitalCents: number; saleCount: number }>();
     const weeklyDays = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
     for (const row of rows) {
       const date = row.occurredAt.toISOString().slice(0, 10);
-      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, saleCount: 0 };
+      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, capitalCents: 0, saleCount: 0 };
       if (row.amountCents > 0) {
         day.revenueCents += row.amountCents;
         day.saleCount += 1;
@@ -44,6 +44,14 @@ export async function GET(request: Request) {
         }
         weeklyDays.set(date, weeklyDay);
       }
+    }
+
+    const nonSalesDeposits = await db.select({ occurredAt: cardAdjustments.occurredAt, amountCents: cardAdjustments.amountCents }).from(cardAdjustments);
+    for (const deposit of nonSalesDeposits) {
+      const date = deposit.occurredAt.toISOString().slice(0, 10);
+      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, capitalCents: 0, saleCount: 0 };
+      day.capitalCents += deposit.amountCents;
+      days.set(date, day);
     }
 
     const { searchParams } = new URL(request.url);
@@ -99,7 +107,7 @@ export async function GET(request: Request) {
     const [openingAudit] = await db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1);
 
     return Response.json({
-      days: [...days.values()],
+      days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
       weeklyDays: [...weeklyDays.values()],
       pendingCount: Number(pendingCount),
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
