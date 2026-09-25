@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
+import { cardAdjustments, cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
 
 function chicagoTime(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -49,19 +49,22 @@ async function dailyReviewMessage(now = new Date()) {
       .where(and(eq(transactions.source, source as "venmo" | "amex"), eq(transactions.classification, "pending")));
     return Number(row.count);
   }));
-  const [ledger, [settings], [checkpoint], [openingAudit]] = await Promise.all([
+  const [ledger, [settings], [checkpoint], [openingAudit], adjustments] = await Promise.all([
     db.select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents })
       .from(transactions).where(eq(transactions.classification, "snack_bar")),
     db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1),
     db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt)).limit(1),
     db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1),
+    db.select({ amountCents: cardAdjustments.amountCents }).from(cardAdjustments),
   ]);
   const today = dateKey(now);
   const lastWeek = day(today); lastWeek.setUTCDate(lastWeek.getUTCDate() - 6);
   const weekRows = ledger.filter((row) => dateKey(row.occurredAt) >= keyOf(lastWeek));
   const weeklyRevenue = weekRows.reduce((sum, row) => sum + Math.max(0, row.amountCents), 0);
   const weeklyExpenses = weekRows.reduce((sum, row) => sum + Math.max(0, -row.amountCents), 0);
-  const balance = (openingAudit?.actualBalanceCents ?? 0) + ledger.reduce((sum, row) => sum + row.amountCents, 0);
+  const balance = (openingAudit?.actualBalanceCents ?? 0)
+    + ledger.reduce((sum, row) => sum + row.amountCents, 0)
+    + adjustments.reduce((sum, row) => sum + row.amountCents, 0);
   const firstSale = ledger.filter((row) => row.amountCents > 0).map((row) => dateKey(row.occurredAt)).sort()[0];
   const semesterStart = settings?.semesterStart || firstSale || today;
   const closures = closuresFrom(settings?.closuresJson || "[]");
