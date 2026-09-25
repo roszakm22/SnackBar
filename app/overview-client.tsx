@@ -6,15 +6,15 @@ import { Area, Cell, CartesianGrid, ComposedChart, Legend, Line, LineChart, Pie,
 import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
 
-type Day = { date: string; revenueCents: number; expenseCents: number; capitalCents: number; saleCount: number };
+type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
 type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum"; current: boolean };
 type Leader = { name: string; totalCents: number; purchases: number; awards: LeaderAward[] };
-type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
+type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; nonSalesDepositsCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
 
 const todayValue = new Date().toISOString().slice(0, 10);
 const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 29);
 const monthAgoValue = monthAgo.toISOString().slice(0, 10);
-const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, latestCashCountAt: null, latestVenmoImportAt: null, openingCardBalanceCents: 0, leaders: [], customerConcentration: { topThreeCents: 0, everyoneElseCents: 0, totalCents: 0, customerCount: 0 } };
+const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, latestCashCountAt: null, latestVenmoImportAt: null, openingCardBalanceCents: 0, nonSalesDepositsCents: 0, leaders: [], customerConcentration: { topThreeCents: 0, everyoneElseCents: 0, totalCents: 0, customerCount: 0 } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 const localDate = (value: string) => new Date(`${value}T12:00:00`);
@@ -68,16 +68,16 @@ export default function OverviewClient() {
   const stats = useMemo(() => {
     const revenue = filtered.reduce((sum, day) => sum + day.revenueCents, 0);
     const expenses = filtered.reduce((sum, day) => sum + day.expenseCents, 0);
-    const capital = filtered.reduce((sum, day) => sum + (day.capitalCents || 0), 0);
+    const capital = data.nonSalesDepositsCents;
     const sales = filtered.reduce((sum, day) => sum + day.saleCount, 0);
     const starting = period === "all" ? data.openingCardBalanceCents : 0;
     return { revenue, expenses, capital, starting, net: starting + revenue + capital - expenses, sales, average: sales ? revenue / sales : 0 };
-  }, [data.openingCardBalanceCents, filtered, period]);
+  }, [data.nonSalesDepositsCents, data.openingCardBalanceCents, filtered, period]);
 
   const chartData = useMemo(() => {
-    let cumulativeNet = period === "all" ? data.openingCardBalanceCents / 100 : 0;
+    let cumulativeNet = (data.nonSalesDepositsCents + (period === "all" ? data.openingCardBalanceCents : 0)) / 100;
     return filtered.map((day) => {
-      cumulativeNet += (day.revenueCents + (day.capitalCents || 0) - day.expenseCents) / 100;
+      cumulativeNet += (day.revenueCents - day.expenseCents) / 100;
       return {
         label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(localDate(day.date)),
         net: cumulativeNet,
@@ -85,7 +85,7 @@ export default function OverviewClient() {
         negative: Math.min(cumulativeNet, 0),
       };
     }).slice(-45);
-  }, [data.openingCardBalanceCents, filtered, period]);
+  }, [data.nonSalesDepositsCents, data.openingCardBalanceCents, filtered, period]);
 
   const chartScale = useMemo(() => moneyChartScale(chartData.map((day) => day.net)), [chartData]);
   const concentrationData = useMemo(() => [
@@ -133,7 +133,7 @@ export default function OverviewClient() {
         </section>
         <section className="dashboard-grid">
           <div className="overview-chart-stack">
-            <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Operating balance over time</h2><p>Non-sales deposits raise the balance from their deposit date forward without counting as revenue.</p></div></div>
+            <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Operating balance over time</h2><p>Non-sales deposits are included in every balance point without counting as revenue.</p></div></div>
             {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis domain={chartScale.domain} ticks={chartScale.ticks} tickFormatter={(value) => chartMoney(Number(value))} tickLine={false} axisLine={false} width={64}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Operating balance"]}/><Area type="monotone" dataKey="negative" stroke="none" fill="#b4493e" fillOpacity={.28} baseValue={0} tooltipType="none" isAnimationActive={false}/><Area type="monotone" dataKey="positive" stroke="none" fill="#356859" fillOpacity={.38} baseValue={0} tooltipType="none" isAnimationActive={false}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Line type="monotone" dataKey="net" name="Operating balance" stroke="#26332e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
             <article className="panel concentration-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER MIX</span><h2>Customer concentration</h2><p>Top three customers compared with everyone else for the leaderboard dates.</p></div></div>

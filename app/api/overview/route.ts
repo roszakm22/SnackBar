@@ -22,11 +22,11 @@ export async function GET(request: Request) {
       .orderBy(asc(transactions.occurredAt))
       .limit(10000);
 
-    const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; capitalCents: number; saleCount: number }>();
+    const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
     const weeklyDays = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();
     for (const row of rows) {
       const date = row.occurredAt.toISOString().slice(0, 10);
-      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, capitalCents: 0, saleCount: 0 };
+      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, saleCount: 0 };
       if (row.amountCents > 0) {
         day.revenueCents += row.amountCents;
         day.saleCount += 1;
@@ -46,13 +46,8 @@ export async function GET(request: Request) {
       }
     }
 
-    const nonSalesDeposits = await db.select({ occurredAt: cardAdjustments.occurredAt, amountCents: cardAdjustments.amountCents }).from(cardAdjustments);
-    for (const deposit of nonSalesDeposits) {
-      const date = deposit.occurredAt.toISOString().slice(0, 10);
-      const day = days.get(date) || { date, revenueCents: 0, expenseCents: 0, capitalCents: 0, saleCount: 0 };
-      day.capitalCents += deposit.amountCents;
-      days.set(date, day);
-    }
+    const nonSalesDeposits = await db.select({ amountCents: cardAdjustments.amountCents }).from(cardAdjustments);
+    const nonSalesDepositsCents = nonSalesDeposits.reduce((sum, deposit) => sum + deposit.amountCents, 0);
 
     const { searchParams } = new URL(request.url);
     const fromValue = searchParams.get("from");
@@ -113,6 +108,7 @@ export async function GET(request: Request) {
       latestCashCountAt: latestCount?.occurredAt.toISOString() ?? null,
       latestVenmoImportAt: latestImport?.createdAt.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
+      nonSalesDepositsCents,
       leaders: rankedLeaders.slice(0, 10).map((leader) => ({
         ...leader,
         awards: awardsByName.get(leader.name.trim().toLowerCase()) || [],
