@@ -3,6 +3,7 @@ import { and, eq, gte, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { cardAudits, cardOutflowApplications, excludedKeys, plaidConnections, transactions } from "../db/schema";
 import { getCardSnapshot } from "./card-audit";
+import { businessDate, isCardExpense } from "./ledger-math";
 
 export type PlaidKind = "venmo" | "amex";
 type Connection = typeof plaidConnections.$inferSelect;
@@ -168,7 +169,7 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
   if (!Number.isSafeInteger(amountCents) || amountCents === 0) return false;
   const occurredAt = new Date(`${row.date}T12:00:00Z`);
   // An initial Plaid sync may return years of history; existing records came from CSV.
-  const cutover = connection.connectedAt.toISOString().slice(0, 10);
+  const cutover = businessDate(connection.connectedAt);
   if (row.date < cutover) return false;
   const db = getDb();
   const sourceKey = `plaid:${row.transaction_id}`;
@@ -189,13 +190,21 @@ async function applyTransaction(connection: Connection, row: PlaidTransaction, a
     }
     return false;
   }
-  if (venmo) {
+  if (venmo && row.date === cutover) {
     // The first day's history can overlap a CSV imported before connecting.
     const dayStart = new Date(`${row.date}T00:00:00Z`);
     const dayEnd = new Date(dayStart.getTime() + 86_400_000);
-    const candidates = await db.select({ amountCents: transactions.amountCents, counterparty: transactions.counterparty })
-      .from(transactions).where(and(eq(transactions.source, "venmo"), gte(transactions.occurredAt, dayStart), lt(transactions.occurredAt, dayEnd)));
-    if (candidates.some((item) => item.amountCents === amountCents && samePerson(item.counterparty, counterparty))) return false;
+    const candidates = await db.select({ id: transactions.id, sourceKey: transactions.sourceKey, amountCents: transactions.amountCents, counterparty: transactions.counterparty })
+      .from(transactions).where(and(eq(transactions.source, "venmo"), like(transactions.sourceKey, "venmo:%"), gte(transactions.occurredAt, dayStart), lt(transactions.occurredAt, dayEnd)));
+    const overlap = candidates.find((item) => item.amountCents === amountCents && samePerson(item.counterparty, counterparty));
+    if (overlap) {
+      // Match one CSV row to one provider ID. Separate identical purchases still count.
+      await db.batch([
+        db.update(transactions).set({ sourceKey }).where(eq(transactions.id, overlap.id)),
+        db.insert(excludedKeys).values({ sourceKey: overlap.sourceKey, excludedAt: new Date() }).onConflictDoNothing(),
+      ]);
+      return false;
+    }
   }
   const id = crypto.randomUUID();
   await db.insert(transactions).values({
@@ -237,7 +246,7 @@ export async function syncConnection(connection: Connection) {
         received.total++;
         if (!accountIds.has(row.account_id)) received.otherAccount++;
         else if (connection.kind === "venmo" && row.amount >= 0) received.outgoing++;
-        else if (row.date < connection.connectedAt.toISOString().slice(0, 10)) received.beforeConnection++;
+        else if (row.date < businessDate(connection.connectedAt)) received.beforeConnection++;
         else if (row.pending) received.pendingIncoming++;
         if (await applyTransaction(connection, row, accountIds)) imported++;
       }
@@ -298,10 +307,10 @@ export async function auditAmexBalance(connection: Connection) {
     .where(and(eq(transactions.source, "amex"), eq(transactions.classification, "pending"))).limit(1);
   const [pendingVenmo] = await db.select({ id: transactions.id }).from(transactions)
     .where(and(eq(transactions.source, "venmo"), eq(transactions.classification, "pending"))).limit(1);
-  const expenses = await db.select({ id: transactions.id }).from(transactions)
+  const expenses = await db.select({ id: transactions.id, source: transactions.source, amountCents: transactions.amountCents, classification: transactions.classification }).from(transactions)
     .where(and(eq(transactions.classification, "snack_bar"), lt(transactions.amountCents, 0)));
   const applied = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
-  if (pending || pendingVenmo || expenses.some((row) => !applied.some((item) => item.transactionId === row.id))) {
+  if (pending || pendingVenmo || expenses.some((row) => isCardExpense(row) && !applied.some((item) => item.transactionId === row.id))) {
     return { balanceCents, checkedAt: now.toISOString(), awaitingReview: true, audited: false };
   }
   const snapshot = await getCardSnapshot(db, now);

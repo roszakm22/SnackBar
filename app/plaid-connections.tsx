@@ -24,7 +24,7 @@ async function plaidApi(body?: Record<string, unknown>) {
   const response = await fetch("/api/ledger/plaid", body ? {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   } : undefined);
-  const result = await response.json();
+  const result = await response.json() as Record<string, unknown> & { error?: string };
   if (!response.ok) throw new Error(result.error || "Plaid connection failed.");
   return result;
 }
@@ -40,7 +40,7 @@ function loadScript() {
       script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
       script.async = true;
       script.dataset.plaidLink = "true";
-      document.head.append(script);
+      document.head.appendChild(script);
     }
   });
 }
@@ -54,7 +54,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   const [syncResults, setSyncResults] = useState<Partial<Record<Kind, SyncResult>>>({});
   const [busy, setBusy] = useState(false);
   const [awardMonth, setAwardMonth] = useState(() => {
-    const date = new Date(); date.setMonth(date.getMonth() - 1);
+    const date = new Date(); date.setDate(1); date.setMonth(date.getMonth() - 1);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   });
 
@@ -138,7 +138,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
     try {
       const result = await plaidApi({ action: "sync", kind }) as SyncResult;
       setSyncResults((current) => ({ ...current, [kind]: result }));
-      toast.success(`Synced ${kind === "venmo" ? "Venmo" : "Amex"}: ${result.imported} new to review. See details below.`);
+      toast.success(`Synced ${kind === "venmo" ? "Venmo" : "Amex"}: ${result.imported} new to review.`);
       await refresh(); await onChangedRef.current();
     } catch (error) { toast.error(error instanceof Error ? error.message : "Sync failed."); }
     finally { setBusy(false); }
@@ -164,9 +164,9 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   };
 
   const disconnect = async (kind: Kind) => {
-    if (!window.confirm(`Disconnect ${kind === "venmo" ? "Venmo" : "Amex"}? On Plaid's free Trial, this will permanently use one of your ten connection slots.`)) return;
+    if (!window.confirm(`Disconnect ${kind === "venmo" ? "Venmo" : "Amex"}? New activity will stop importing.`)) return;
     setBusy(true);
-    try { await plaidApi({ action: "disconnect", kind }); await refresh(); toast.success("Disconnected."); }
+    try { await plaidApi({ action: "disconnect", kind }); await refresh(); await onChangedRef.current(); toast.success("Disconnected."); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Disconnect failed."); }
     finally { setBusy(false); }
   };
@@ -176,7 +176,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
     setBusy(true);
     try {
       const response = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "finalize_awards_month", month: awardMonth }) });
-      const result = await response.json();
+      const result = await response.json() as Record<string, unknown> & { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not finalize awards.");
       toast.success(`Awards finalized for ${awardMonth}.`);
       await onChangedRef.current();
@@ -187,15 +187,15 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   return (
     <section className="panel plaid-panel">
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
-        <p>Plaid checks for posted activity; SnackBar syncs every four hours. Venmo payments and Amex deposits and purchases wait for your review.</p></div></div>
-      {!configured && <p>To enable connections, add the Plaid Worker secrets and redirect URL described in the repository README.</p>}
-      <div className="plaid-account"><div><strong>Teams report</strong><span>{teamsReady ? "Configured · Daily metrics report at 5 PM Chicago time" : "Add the TEAMS_FLOW_URL Worker secret to enable the report"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
+        <p>Imports run every four hours. New activity goes to Review.</p></div></div>
+      {!configured && <p>Account connections are not configured yet.</p>}
+      <div className="plaid-account"><div><strong>Teams report</strong><span>{teamsReady ? "Configured · Daily metrics report at 5 PM Chicago time" : "Report not configured"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
       {(["venmo", "amex"] as Kind[]).map((kind) => {
         const connection = connections.find((item) => item.kind === kind);
         return <div className="plaid-account" key={kind}>
           <div><strong>{kind === "venmo" ? "Venmo Personal" : "American Express"}</strong>
             <span>{connection ? `Connected · Last sync ${connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "pending"}` : "Not connected"}</span>
-            {syncResults[kind] && <small className="plaid-sync-detail">Plaid last checked transactions: {syncResults[kind].transactionsStatus?.last_successful_update ? new Date(syncResults[kind].transactionsStatus!.last_successful_update!).toLocaleString() : "not available"}. This sync received {syncResults[kind].received.total} updates; {syncResults[kind].received.pendingIncoming} still pending, {syncResults[kind].received.beforeConnection} dated before connection, {syncResults[kind].received.otherAccount} from another account{kind === "venmo" ? `, ${syncResults[kind].received.outgoing} money out` : ""}. Sync reads Plaid&apos;s latest stored data; it does not force Plaid to check Venmo.</small>}
+            {syncResults[kind] && <details className="plaid-sync-detail"><summary>{syncResults[kind].imported} imported · Sync details</summary><p>Provider last checked: {syncResults[kind].transactionsStatus?.last_successful_update ? new Date(syncResults[kind].transactionsStatus!.last_successful_update!).toLocaleString() : "Unavailable"}</p><p>{syncResults[kind].received.total} updates · {syncResults[kind].received.pendingIncoming} pending · {syncResults[kind].received.beforeConnection} before connection · {syncResults[kind].received.otherAccount} other account{kind === "venmo" ? ` · ${syncResults[kind].received.outgoing} outgoing` : ""}</p><p>Sync uses the provider&apos;s latest data. A new payment may take time to appear.</p></details>}
             {connection?.lastError && <small className="plaid-error">{connection.lastError}</small>}</div>
           <div className="plaid-actions">
             {connection ? <>
@@ -207,12 +207,11 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
           </div>
         </div>;
       })}
-      {connections.some((item) => item.kind === "venmo") && <div className="plaid-awards">
-        <label htmlFor="plaid-awards-month">Finalize monthly awards after all payments are reviewed</label>
+      <div className="plaid-awards">
+        <label htmlFor="plaid-awards-month">Close an awards month</label>
         <input id="plaid-awards-month" type="month" value={awardMonth} onChange={(event) => setAwardMonth(event.target.value)}/>
         <Button variant="outline" disabled={busy} onClick={() => void finalizeAwards()}>Finalize awards</Button>
-      </div>}
-      <p className="plaid-footnote">Plaid may omit a Venmo payer name. Check it before approval. CSV import stays available for dates before the Venmo connection.</p>
+      </div>
     </section>
   );
 }

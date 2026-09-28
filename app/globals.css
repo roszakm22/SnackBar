@@ -220,6 +220,12 @@
 .plaid-account > div:first-child { display: grid; gap: .25rem; }
 .plaid-account span, .plaid-footnote { color: #68716b; font-size: .9rem; }
 .plaid-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.plaid-sync-detail { color: #68716b; font-size: .85rem; max-width: 40rem; }
+.plaid-sync-detail summary { cursor: pointer; padding: .35rem 0; }
+.plaid-sync-detail p { margin: .35rem 0; }
+.plaid-awards { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding-top: .75rem; border-top: 1px solid #ddd8cc; }
+.plaid-awards input { border: 1px solid #cbd2cd; border-radius: 8px; padding: .5rem; }
+.net-stripe { flex-wrap: wrap; }
 .plaid-error { color: #a64235; max-width: 28rem; }
 .review-name { display: grid; gap: .5rem; margin: 1rem 0; }
 @media (max-width: 680px) { .plaid-account { align-items: flex-start; flex-direction: column; } }

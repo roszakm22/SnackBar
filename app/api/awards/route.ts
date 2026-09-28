@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { outlookTargets, transactions } from "../../../db/schema";
+import { businessDate, businessMonthBounds } from "../../../lib/ledger-math";
 
 export const dynamic = "force-dynamic";
 
@@ -10,19 +11,11 @@ const tierFor = (amountCents: number) =>
   amountCents >= 2500 ? "Silver" :
   amountCents >= 1500 ? "Bronze" : "Unranked";
 
-const monthBounds = (month: string) => {
-  const [year, monthNumber] = month.split("-").map(Number);
-  return {
-    start: new Date(Date.UTC(year, monthNumber - 1, 1)),
-    end: new Date(Date.UTC(year, monthNumber, 1)),
-  };
-};
-
 export async function GET() {
   try {
     const db = getDb();
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const { start, end } = monthBounds(currentMonth);
+    const currentMonth = businessDate().slice(0, 7);
+    const { start, end } = businessMonthBounds(currentMonth);
     const currentRows = await db
       .select({ counterparty: transactions.counterparty, amountCents: transactions.amountCents })
       .from(transactions)

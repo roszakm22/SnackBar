@@ -9,10 +9,10 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - One-at-a-time classification as snack bar or personal
 - Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
-- Card balance audits against approved Venmo sales, posted card expenses, and non-sales deposits
+- Card balance audits against confirmed transfers, posted card expenses, and non-sales deposits
 - Semester-aware outlooks based on weekday-specific performance across the latest 14 completed operating days, with D1-backed closure periods that pause projections; tracked goals preserve their original date and pace for later comparison
 - Starting card funds included in all-time net performance and outlook progress
-- Donations and other card deposits that affect the audit without counting as income
+- Donations and other added funds included consistently in the overview, outlooks, Teams report, and card audit without counting as sales
 - Manual ledger entries
 - Public performance overview at `/`
 - Public customer leaderboard with a selectable date range
@@ -44,7 +44,7 @@ The Worker has a Cron Trigger every four hours to fetch posted transactions. The
 
 ### Teams notifications
 
-SnackBar sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains approved revenue, expenses, operating balance, outlook, and review counts. It does not include payer names or notes. The report starts only after configuration.
+SnackBar sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains approved revenue, expenses, operating balance, outlook, all tracked goals, and review counts. It does not include payer names or notes. The report starts only after configuration.
 
 1. In Power Automate or Teams Workflows, create a flow using **When a Teams webhook request is received**. For a secret URL managed only by you, choose its **Anyone** authentication option; do not share the URL.
 2. Add **Parse JSON** with Content set using the `triggerBody()` expression. Paste the schema below. Do not include the Message Card `@type` or `@context` fields in the schema; Power Automate's editor interprets keys starting with `@` as expressions.
@@ -92,7 +92,7 @@ SnackBar sends a daily metrics report at 5 PM America/Chicago (including days wi
 
 The four-hour Plaid sync stays in place. A separate ten-minute cron checks for the 5 PM report. Remove the secret to pause the report.
 
-Venmo's Plaid descriptions may not include the payer's name. Check and edit each name in the review queue before approving it; missing names are blocked from approval. Amex checking deposits enter review as either Venmo transfers or other deposits; neither counts as another sale. Confirmed deposits update the card audit. Amex purchases enter review as expenses and, once approved, wait under **Expenses waiting to post** until you apply them to the card audit. When Amex is connected, the audit uses confirmed Amex transfers instead of Venmo sales to track money reaching the account. If a cash-to-card transfer was already recorded manually, choose **Already recorded cash transfer** on the matching Amex credit so it is not counted twice. Check for duplicate manual deposits and expenses before applying imported activity. After each scheduled sync (or **Refresh Amex balance**), Plaid reads the existing Amex checking connection’s current posted balance and creates an automatic card audit when no Amex items or approved expenses remain to review. The first eligible balance sets the baseline; you can still enter a manual balance if Plaid Balance is unavailable. Outgoing Venmo transfers are ignored; incoming Amex refunds must be classified in review. CSV import still works for historical dates before Venmo was connected; overlapping CSVs are blocked to avoid double-counting. To close a month when using Plaid, review all of its Venmo payments and then use **Finalize awards** in Connections. Verify the last Plaid sync before closing, because late posted transactions cannot be included after an award month is finalized.
+Venmo's Plaid descriptions may not include the payer's name. Check and edit each name in the review queue before approving it; missing names are blocked from approval. Amex checking credits can be classified as Venmo transfers, donations / added funds, purchase refunds, or already-recorded deposits. Refunds reduce expenses rather than increasing revenue. Confirmed deposits update the card audit. Amex purchases enter review as expenses and, once approved, wait under **Expenses to apply** until you apply them to the card audit. When Amex is connected, the audit uses confirmed Amex transfers instead of Venmo sales to track money reaching the account. If a donation or cash-to-card transfer was already recorded manually, choose **Already recorded** on the matching Amex credit so it is not counted twice. Check for duplicate manual deposits and expenses before applying imported activity. After each scheduled sync (or **Refresh Amex balance**), Plaid reads the existing Amex checking connection’s current posted balance and creates an automatic card audit when no Venmo or Amex items or card expenses remain to review and tracked Venmo receipts have reached Amex. The first eligible balance sets the baseline; you can still enter a manual balance if Plaid Balance is unavailable. Outgoing Venmo transfers are ignored; incoming Amex refunds use **Purchase refund** in review. CSV import still works for historical dates before Venmo was connected; overlapping CSVs are blocked to avoid double-counting. To close a month when using Plaid, review all of its Venmo payments and then use **Finalize awards** in Connections. Verify the last Plaid sync before closing, because late posted transactions cannot be included after an award month is finalized.
 
 The root page, `/awards`, `/api/overview`, and `/api/awards` stay public. The overview API returns daily aggregates, leaderboard totals, and operational timestamps. The awards API returns customer names, monthly purchase totals, and earned tiers. Neither API returns Venmo notes, individual transactions, cash balances, or current card balances.
 
@@ -106,3 +106,20 @@ For local development, run `npm ci` followed by `npm run dev`. The local Worker 
 - `npm run build` — production build
 - `npm run deploy` — build, migrate the remote D1 database, and deploy
 - `npm run db:generate` — generate a migration after schema changes
+
+
+## Money-flow rules
+
+- Cash-to-card transfers move existing funds; they never raise operating funds. Migration 0013 identifies earlier paired cash withdrawal/card adjustment records and marks them as transfers.
+- Only added funds increase the non-sales operating baseline. This total is shared by Overview, Outlooks and Teams and is not limited by the visible deposit-history list.
+- An approved Amex refund reduces net expenses and raises the card balance. It does not increase sales, awards, or forecast revenue pace.
+- Manual cash entries also record the corresponding box movement, so the next count cannot count them again. Cash expenses never enter the card application queue.
+- An unresolved audit variance carries forward from the prior expected balance. Only an explicit new baseline accepts the actual balance as the new expectation.
+- Deleting eligible entries removes linked records and prevents reimport. Generated cash counts and expenses already included in completed audits are protected.
+- Venmo duplicate matching uses the provider transaction ID. On the first connection day, each CSV overlap is matched to one provider record; separate equal-value purchases remain separate.
+- Awards and daily totals use the America/Chicago calendar. Manual date-only entries retain the chosen calendar day.
+- Overview date filters retain the opening balance from earlier activity. Cash totals count as revenue, but cash counts do not inflate individual sale counts or average sale size.
+
+## Verification
+
+`npm test` builds the app and runs financial workflow checks against an isolated local database and local Worker. Tests cover cash counts, transfers, donations, expense application, refunds, persistent audit differences, CSV duplicates, awards, dates, and the migration. No bank requests or Teams messages are sent by these tests.

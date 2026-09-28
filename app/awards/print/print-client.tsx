@@ -25,10 +25,11 @@ export default function AwardsPrintClient() {
 
   useEffect(() => {
     const requestedMonth = new URLSearchParams(window.location.search).get("month") || new Date().toISOString().slice(0, 7);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) { setError("Choose a valid awards month."); return; }
     setMonth(requestedMonth);
     fetch("/api/awards", { cache: "no-store" })
       .then(async (response) => {
-        const body = await response.json();
+        const body = await response.json() as AwardsData & { error?: string };
         if (!response.ok) throw new Error(body.error || "Awards could not be loaded.");
         setData(body);
       })
@@ -73,7 +74,7 @@ export default function AwardsPrintClient() {
             <div className="poster-recipients">{recipients.length ? recipients.map((recipient, index) => <div className="poster-recipient" key={recipient.name}><span>{String(index + 1).padStart(2, "0")}</span><strong>{recipient.name}</strong><b>{money(recipient.amountCents)}</b></div>) : <div className="poster-tier-empty" aria-label={`No ${tier.name} recipients`}><span /></div>}</div>
           </article>;
         })}
-      </div> : <div className="poster-no-awards"><Award /><h2>No awards were handed out.</h2><p>{monthLabel(month)} remains part of the Snack Bar Hall of Fame.</p></div>}
+      </div> : <div className="poster-no-awards"><Award /><h2>{poster.finalized ? "No awards were handed out." : "No award recipients yet."}</h2><p>{poster.finalized ? "Finalized monthly results." : "Awards have not been finalized for this month."}</p></div>}
 
       <footer className="poster-footer"><span>BRONZE $15</span><i /><span>SILVER $25</span><i /><span>GOLD $35</span><i /><span>PLATINUM $50</span><b>DET 930 · SNACK BAR</b></footer>
     </section>

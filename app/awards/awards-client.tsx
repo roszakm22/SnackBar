@@ -30,7 +30,7 @@ export default function AwardsClient() {
   useEffect(() => {
     fetch("/api/awards", { cache: "no-store" })
       .then(async (response) => {
-        const body = await response.json();
+        const body = await response.json() as AwardsData & { error?: string };
         if (!response.ok) throw new Error(body.error || "Awards could not be loaded.");
         setData(body);
       })
@@ -54,13 +54,13 @@ export default function AwardsClient() {
 
     <main className="workspace">
       <div className="nav-strip"><div className="public-tabs"><a className="public-tab" href="/"><BarChart3 /> Overview</a><span className="public-tab active"><Award /> Awards</span></div></div>
-      <section className="awards-heading"><div className="awards-heading-icon"><Award /></div><div><span className="eyebrow">Monthly awards</span><h2>Snack Bar Hall of Fame</h2><p>Every purchase adds to the month. Awards are permanent once the next month begins.</p></div></section>
+      <section className="awards-heading"><div className="awards-heading-icon"><Award /></div><div><span className="eyebrow">Monthly awards</span><h2>Snack Bar Hall of Fame</h2><p>Monthly recognition for snack bar purchases.</p></div></section>
       {loading ? <div className="loading-row"><Loader2 className="spin" /> Loading awards…</div> : error ? <div className="overview-error">{error}</div> :
       <Tabs defaultValue="current" className="awards-tabs">
         <TabsList><TabsTrigger value="current">Current month</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
         <TabsContent value="current" className="awards-content">
           <div className="awards-month-title"><div><span className="eyebrow">In progress</span><h3>{monthLabel(data.currentMonth)}</h3></div><div className="awards-month-actions"><p>$15 Bronze · $25 Silver · $35 Gold · $50 Platinum</p><Button asChild variant="outline"><a href={`/awards/print?month=${data.currentMonth}`} target="_blank" rel="noreferrer"><Printer /> Preview poster</a></Button></div></div>
-          {data.current.length === 0 ? <div className="empty-awards"><Award /><h3>No awards activity yet</h3><p>Approved Venmo purchases will show up here.</p></div> :
+          {data.current.length === 0 ? <div className="empty-awards"><Award /><h3>No awards activity yet</h3><p>Approved eligible purchases appear here.</p></div> :
           tiers.map((tier) => {
             const people = data.current.filter((person) => person.tier === tier);
             const details = tierDetails[tier];
@@ -79,8 +79,8 @@ export default function AwardsClient() {
           })}
         </TabsContent>
         <TabsContent value="history" className="awards-content">
-          <div className="awards-month-title"><div><span className="eyebrow">Final results</span><h3>Award history</h3></div><p>Completed months are locked when the next month’s statement is imported.</p></div>
-          {historyMonths.length === 0 ? <div className="empty-awards"><Award /><h3>No completed months yet</h3><p>The first month will appear here after the next month’s Venmo statement is imported.</p></div> :
+          <div className="awards-month-title"><div><span className="eyebrow">Final results</span><h3>Award history</h3></div><p>Finalized monthly results.</p></div>
+          {historyMonths.length === 0 ? <div className="empty-awards"><Award /><h3>No completed months yet</h3><p>Results appear after the manager finalizes a month.</p></div> :
           historyMonths.map(([month, awards]) => <section className="history-month" key={month}><div className="history-month-heading"><h3>{monthLabel(month)}</h3><Button asChild variant="outline" size="sm"><a href={`/awards/print?month=${month}`} target="_blank" rel="noreferrer"><Printer /> Print awards</a></Button></div>{awards.length ? <div className="history-awards">{awards.map((award) => <article className={`history-award ${tierDetails[award.tier].className}`} key={`${month}-${award.name}`}><span className="award-medallion"><Award /></span><div><strong>{award.name}</strong><small>{award.tier}</small></div><b>{money(award.amountCents)}</b></article>)}</div> : <p className="history-no-awards">No awards were handed out.</p>}</section>)}
         </TabsContent>
       </Tabs>}

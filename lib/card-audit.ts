@@ -22,7 +22,7 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
         and(notLike(transactions.sourceKey, "plaid:%"), gt(transactions.occurredAt, since)),
       )));
   const otherDeposits = await db.select({ amountCents: transactions.amountCents }).from(transactions)
-    .where(and(eq(transactions.classification, "card_deposit"), eq(transactions.source, "amex"), gt(transactions.reviewedAt, since)));
+    .where(and(or(eq(transactions.classification, "card_deposit"), eq(transactions.classification, "card_refund")), eq(transactions.source, "amex"), gt(transactions.reviewedAt, since)));
   const adjustments = await db
     .select({ amountCents: cardAdjustments.amountCents })
     .from(cardAdjustments)
@@ -31,10 +31,10 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
     .select({ amountCents: transactions.amountCents })
     .from(cardOutflowApplications)
     .innerJoin(transactions, eq(cardOutflowApplications.transactionId, transactions.id))
-    .where(gt(cardOutflowApplications.appliedAt, since));
+    .where(and(gt(cardOutflowApplications.appliedAt, since), or(eq(transactions.source, "amex"), eq(transactions.source, "manual"))));
   const ledgerMovementCents = movements.reduce((sum, row) => sum + row.amountCents, 0);
   const venmoSales = usesAmexTransfers ? await db.select({ amountCents: transactions.amountCents }).from(transactions)
-    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"), gt(transactions.occurredAt, since))) : [];
+    .where(and(eq(transactions.classification, "snack_bar"), eq(transactions.source, "venmo"), eq(transactions.direction, "incoming"), gt(transactions.reviewedAt, since))) : [];
   const untransferredVenmoCents = usesAmexTransfers
     ? Math.max(0, venmoSales.reduce((sum, row) => sum + row.amountCents, 0) - ledgerMovementCents)
     : 0;
@@ -49,7 +49,7 @@ export async function getCardSnapshot(db: ReturnType<typeof getDb>, checkedAt = 
     otherDepositCents,
     adjustmentCents,
     cardOutflowCents,
-    expectedBalanceCents: lastAudit.actualBalanceCents + ledgerMovementCents + otherDepositCents + adjustmentCents + cardOutflowCents,
+    expectedBalanceCents: lastAudit.expectedBalanceCents + ledgerMovementCents + otherDepositCents + adjustmentCents + cardOutflowCents,
     checkedAt,
   };
 }

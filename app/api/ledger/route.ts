@@ -3,6 +3,8 @@ import { getDb } from "../../../db";
 import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 import { getCardSnapshot } from "../../../lib/card-audit";
+import { getOperatingFunds } from "../../../lib/operating-funds";
+import { businessDate, businessMonthBounds, isCardExpense } from "../../../lib/ledger-math";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +18,13 @@ function serialize(row: typeof transactions.$inferSelect) {
 }
 
 function parseMoney(value: unknown) {
-  const amount = Number(String(value ?? "").replace(/[$,\s]/g, ""));
-  return Number.isFinite(amount) ? Math.round(amount * 100) : null;
+  const text = String(value ?? "").replace(/[$,\s]/g, "");
+  const cents = Math.round(Number(text) * 100);
+  return text && Number.isSafeInteger(cents) ? cents : null;
 }
 
 function monthKey(date: Date) {
-  return date.toISOString().slice(0, 7);
+  return businessDate(date).slice(0, 7);
 }
 
 function monthLabel(month: string) {
@@ -29,9 +32,7 @@ function monthLabel(month: string) {
 }
 
 function monthBounds(month: string) {
-  const start = new Date(`${month}-01T00:00:00Z`);
-  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
-  return { start, end };
+  return businessMonthBounds(month);
 }
 
 type ForecastClosure = { id: string; label: string; start: string; end: string };
@@ -97,7 +98,7 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
 export async function GET() {
   try {
     const db = getDb();
-    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt)).limit(10000);
+    const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt));
     const [savedForecastSettings] = await db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1);
     const savedForecastCheckpoints = await db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt));
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
@@ -110,9 +111,10 @@ export async function GET() {
     const adjustments = await db.select().from(cardAdjustments).orderBy(desc(cardAdjustments.occurredAt)).limit(40);
     const appliedOutflows = await db.select({ transactionId: cardOutflowApplications.transactionId }).from(cardOutflowApplications);
     const appliedOutflowIds = new Set(appliedOutflows.map((row) => row.transactionId));
-    const pendingCardOutflows = rows.filter((row) => row.classification === "snack_bar" && row.amountCents < 0 && !appliedOutflowIds.has(row.id));
+    const pendingCardOutflows = rows.filter((row) => isCardExpense(row) && !appliedOutflowIds.has(row.id));
     const [amexBalance] = await db.select({ balanceCents: plaidConnections.balanceCents, balanceCheckedAt: plaidConnections.balanceCheckedAt }).from(plaidConnections).where(eq(plaidConnections.kind, "amex")).limit(1);
     const cardSnapshot = await getCardSnapshot(db);
+    const operatingFunds = await getOperatingFunds(db);
     const now = new Date();
     const termAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() >= 6 ? 6 : 0, 1));
     const termRevenueDates = rows
@@ -122,7 +124,9 @@ export async function GET() {
     const defaultSemesterStart = (termRevenueDates[0] || now).toISOString().slice(0, 10);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
-      ledger: rows.filter((row) => row.classification === "snack_bar").map(serialize),
+      ledger: rows.filter((row) => row.classification === "snack_bar" || row.classification === "card_refund").map(serialize),
+      nonSalesDepositsCents: operatingFunds.nonSalesDepositsCents,
+      nonSalesDeposits: operatingFunds.deposits.map((row) => ({ ...row, occurredAt: row.occurredAt?.toISOString() ?? null })),
       personalCount,
       batches: batches.map((batch) => ({ ...batch, createdAt: batch.createdAt.toISOString() })),
       cashEvents: cashEvents.map((event) => ({ ...event, occurredAt: event.occurredAt.toISOString(), createdAt: event.createdAt.toISOString() })),
@@ -173,6 +177,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    if (request.headers.get("origin") !== new URL(request.url).origin) {
+      return Response.json({ error: "This action must come from the manager page." }, { status: 403 });
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const action = String(body.action || "");
     const db = getDb();
@@ -248,7 +255,7 @@ export async function POST(request: Request) {
       if (!csv || csv.length > 8_000_000) return Response.json({ error: "Choose a CSV smaller than 8 MB." }, { status: 400 });
       const parsed = parseVenmoCsv(csv);
       const [plaidVenmo] = await db.select({ connectedAt: plaidConnections.connectedAt }).from(plaidConnections).where(eq(plaidConnections.kind, "venmo")).limit(1);
-      if (plaidVenmo && parsed.transactions.some((row) => row.occurredAt.toISOString().slice(0, 10) >= plaidVenmo.connectedAt.toISOString().slice(0, 10))) {
+      if (plaidVenmo && parsed.transactions.some((row) => businessDate(row.occurredAt) >= businessDate(plaidVenmo.connectedAt))) {
         return Response.json({ error: "This CSV overlaps your Plaid Venmo connection. Use Sync Venmo for current payments; CSV import remains available for earlier dates." }, { status: 409 });
       }
       const parsedMonths = [...new Set(parsed.transactions.filter((row) => row.direction === "incoming").map((row) => monthKey(row.occurredAt)))].sort();
@@ -309,7 +316,11 @@ export async function POST(request: Request) {
         matches.forEach((row) => existing.add(row.sourceKey));
         excluded.forEach((row) => existing.add(row.sourceKey));
       }
-      const fresh = parsed.transactions.filter((row) => !existing.has(row.sourceKey));
+      const fresh = parsed.transactions.filter((row) => {
+        if (existing.has(row.sourceKey)) return false;
+        existing.add(row.sourceKey);
+        return true;
+      });
       const batchId = crypto.randomUUID();
       const now = new Date();
       await db.insert(importBatches).values({ id: batchId, fileName, importedCount: fresh.length, duplicateCount: parsed.transactions.length - fresh.length, skippedCount: parsed.skipped, createdAt: now });
@@ -326,6 +337,7 @@ export async function POST(request: Request) {
         : body.classification === "personal" ? "personal"
         : body.classification === "card_transfer" ? "card_transfer"
         : body.classification === "card_deposit" ? "card_deposit"
+        : body.classification === "card_refund" ? "card_refund"
         : body.classification === "card_confirmed" ? "card_confirmed" : null;
       if (!ids.length || !classification) return Response.json({ error: "Choose at least one transaction and a classification." }, { status: 400 });
       const revisedName = body.counterparty === undefined ? null : String(body.counterparty || "").trim().slice(0, 150);
@@ -346,7 +358,7 @@ export async function POST(request: Request) {
           if (rows.some((row) => row.source === "amex" && row.amountCents > 0 && classification === "snack_bar")) {
             return Response.json({ error: "Classify Amex money in as a transfer or deposit, so it is not counted as another sale." }, { status: 400 });
           }
-          if ((classification === "card_transfer" || classification === "card_deposit" || classification === "card_confirmed") && rows.some((row) => row.source !== "amex" || row.amountCents <= 0)) {
+          if ((classification === "card_transfer" || classification === "card_deposit" || classification === "card_confirmed" || classification === "card_refund") && rows.some((row) => row.source !== "amex" || row.amountCents <= 0)) {
             return Response.json({ error: "Only incoming Amex transactions can be card transfers or deposits." }, { status: 400 });
           }
           if (rows.some((row) => row.source === "venmo" && row.sourceKey.startsWith("plaid:") && (revisedName || row.counterparty).toLowerCase().includes("unknown venmo payer"))) {
@@ -359,22 +371,30 @@ export async function POST(request: Request) {
     }
 
     if (action === "manual") {
-      const amount = Number(body.amount);
-      const occurredAt = new Date(String(body.date || ""));
+      const parsedAmount = parseMoney(body.amount);
+      const date = String(body.date || "");
+      const occurredAt = new Date(`${date}T12:00:00Z`);
       const source = body.source === "cash" ? "cash" : "manual";
       const direction = body.direction === "outgoing" ? "outgoing" : "incoming";
       const countTowardAwards = body.countTowardAwards === true;
       const counterparty = String(body.counterparty || "").trim();
-      if (!Number.isFinite(amount) || amount <= 0 || Number.isNaN(occurredAt.getTime())) return Response.json({ error: "Enter a valid date and an amount greater than zero." }, { status: 400 });
+      if (parsedAmount === null || parsedAmount <= 0 || !validDateKey(date) || date > businessDate()) return Response.json({ error: "Enter today's date or an earlier date and an amount greater than zero." }, { status: 400 });
       if (countTowardAwards && (source !== "manual" || direction !== "incoming")) return Response.json({ error: "Only manual money-in purchases can count toward awards." }, { status: 400 });
       if (countTowardAwards && !counterparty) return Response.json({ error: "Enter the customer's name when counting a purchase toward awards." }, { status: 400 });
       if (countTowardAwards) {
         const [closedMonth] = await db.select({ id: outlookTargets.id }).from(outlookTargets).where(eq(outlookTargets.id, `award-close:${monthKey(occurredAt)}`)).limit(1);
         if (closedMonth) return Response.json({ error: `${monthLabel(monthKey(occurredAt))} awards are already finalized.` }, { status: 400 });
       }
-      const amountCents = Math.round(amount * 100) * (direction === "outgoing" ? -1 : 1);
+      const amountCents = parsedAmount * (direction === "outgoing" ? -1 : 1);
       const now = new Date();
-      await db.insert(transactions).values({ id: crypto.randomUUID(), sourceKey: `manual:${crypto.randomUUID()}`, importBatchId: null, occurredAt, amountCents, source, direction, counterparty, note: String(body.note || ""), originalType: countTowardAwards ? "Manual award purchase" : "Manual entry", originalStatus: "Complete", classification: "snack_bar", createdAt: now, reviewedAt: now });
+      const id = crypto.randomUUID();
+      const entry = db.insert(transactions).values({ id, sourceKey: `manual:${crypto.randomUUID()}`, importBatchId: null, occurredAt, amountCents, source, direction, counterparty, note: String(body.note || ""), originalType: countTowardAwards ? "Manual award purchase" : "Manual entry", originalStatus: "Complete", classification: "snack_bar", createdAt: now, reviewedAt: now });
+      if (source === "cash") {
+        // This amount is already in the ledger. Exclude it from the next count's sales calculation.
+        const [latestCount] = await db.select({ occurredAt: cashBoxEvents.occurredAt }).from(cashBoxEvents).where(eq(cashBoxEvents.eventType, "count")).orderBy(desc(cashBoxEvents.occurredAt)).limit(1);
+        if (latestCount && date < businessDate(latestCount.occurredAt)) return Response.json({ error: "This cash activity predates your latest count. Correct the existing cash record instead of entering it twice." }, { status: 400 });
+        await db.batch([entry, db.insert(cashBoxEvents).values({ id: crypto.randomUUID(), occurredAt: now, eventType: direction === "outgoing" ? "withdrawal" : "deposit", amountCents: parsedAmount, billsCents: 0, coinsCents: 0, calculatedChangeCents: 0, ledgerTransactionId: id, note: String(body.note || "Manual cash entry"), createdAt: now })]);
+      } else await entry;
       return Response.json({ created: true });
     }
 
@@ -426,13 +446,12 @@ export async function POST(request: Request) {
       if (amountCents === null || amountCents <= 0) return Response.json({ error: "Enter a transfer amount greater than zero." }, { status: 400 });
       const now = new Date();
       const note = String(body.note || "").trim() || "Cash deposit to card";
-      await db.insert(cashBoxEvents).values({
+      await db.batch([db.insert(cashBoxEvents).values({
         id: crypto.randomUUID(), occurredAt: now, eventType: "withdrawal", amountCents,
         billsCents: 0, coinsCents: 0, calculatedChangeCents: 0, ledgerTransactionId: null, note, createdAt: now,
-      });
-      await db.insert(cardAdjustments).values({
-        id: crypto.randomUUID(), occurredAt: now, amountCents, note, createdAt: now,
-      });
+      }), db.insert(cardAdjustments).values({
+        id: crypto.randomUUID(), occurredAt: now, amountCents, kind: "cash_transfer", note, createdAt: now,
+      })]);
       return Response.json({ created: true, amountCents });
     }
 
@@ -469,7 +488,7 @@ export async function POST(request: Request) {
       const transactionId = String(body.transactionId || "");
       if (!transactionId) return Response.json({ error: "Transaction id is required." }, { status: 400 });
       const [transaction] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
-      if (!transaction || transaction.classification !== "snack_bar" || transaction.amountCents >= 0) return Response.json({ error: "Choose an approved expense." }, { status: 400 });
+      if (!transaction || !isCardExpense(transaction)) return Response.json({ error: "Choose an approved card expense. Cash expenses do not affect Amex." }, { status: 400 });
       await db.insert(cardOutflowApplications).values({ id: crypto.randomUUID(), transactionId, appliedAt: new Date(), createdAt: new Date() }).onConflictDoNothing({ target: cardOutflowApplications.transactionId });
       return Response.json({ applied: true, amountCents: transaction.amountCents });
     }
@@ -477,7 +496,18 @@ export async function POST(request: Request) {
     if (action === "delete") {
       const id = String(body.id || "");
       if (!id) return Response.json({ error: "Transaction id is required." }, { status: 400 });
-      await db.delete(transactions).where(eq(transactions.id, id));
+      const [entry] = await db.select().from(transactions).where(eq(transactions.id, id));
+      if (!entry) return Response.json({ error: "Entry not found." }, { status: 404 });
+      if (entry.originalType === "Cash box count") return Response.json({ error: "Use Cash box to record a corrected count." }, { status: 400 });
+      const [applied] = await db.select().from(cardOutflowApplications).where(eq(cardOutflowApplications.transactionId, id));
+      const snapshot = await getCardSnapshot(db);
+      if (applied && snapshot.lastAudit && applied.appliedAt <= snapshot.lastAudit.checkedAt) return Response.json({ error: "This expense belongs to a completed audit and cannot be deleted here." }, { status: 409 });
+      await db.batch([
+        db.insert(excludedKeys).values({ sourceKey: entry.sourceKey, excludedAt: new Date() }).onConflictDoNothing(),
+        db.delete(cardOutflowApplications).where(eq(cardOutflowApplications.transactionId, id)),
+        db.delete(cashBoxEvents).where(eq(cashBoxEvents.ledgerTransactionId, id)),
+        db.delete(transactions).where(eq(transactions.id, id)),
+      ]);
       return Response.json({ deleted: true });
     }
 

@@ -44,6 +44,13 @@ function amountToCents(value: string) {
 }
 
 function parseDate(value: string) {
+  const calendarDate = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (calendarDate) return new Date(`${calendarDate[0]}T12:00:00Z`);
+  const shortDate = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (shortDate) {
+    const year = Number(shortDate[3]) < 100 ? 2000 + Number(shortDate[3]) : Number(shortDate[3]);
+    return new Date(`${year}-${shortDate[1].padStart(2, "0")}-${shortDate[2].padStart(2, "0")}T12:00:00Z`);
+  }
   const direct = new Date(value);
   if (!Number.isNaN(direct.getTime())) return direct;
   const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(.*))?$/);

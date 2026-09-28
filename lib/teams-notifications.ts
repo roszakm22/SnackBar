@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { cardAdjustments, cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
+import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
+import { getOperatingFunds } from "./operating-funds";
+import { expenseCents, revenueCents } from "./ledger-math";
 
 function chicagoTime(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -49,23 +51,23 @@ async function dailyReviewMessage(now = new Date()) {
       .where(and(eq(transactions.source, source as "venmo" | "amex"), eq(transactions.classification, "pending")));
     return Number(row.count);
   }));
-  const [ledger, [settings], [checkpoint], [openingAudit], adjustments] = await Promise.all([
-    db.select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents })
-      .from(transactions).where(eq(transactions.classification, "snack_bar")),
+  const [ledger, [settings], checkpoints, [openingAudit], funds] = await Promise.all([
+    db.select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, classification: transactions.classification })
+      .from(transactions).where(or(eq(transactions.classification, "snack_bar"), eq(transactions.classification, "card_refund"))),
     db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1),
-    db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt)).limit(1),
+    db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt)),
     db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1),
-    db.select({ amountCents: cardAdjustments.amountCents }).from(cardAdjustments),
+    getOperatingFunds(db),
   ]);
   const today = dateKey(now);
   const lastWeek = day(today); lastWeek.setUTCDate(lastWeek.getUTCDate() - 6);
-  const weekRows = ledger.filter((row) => dateKey(row.occurredAt) >= keyOf(lastWeek));
-  const weeklyRevenue = weekRows.reduce((sum, row) => sum + Math.max(0, row.amountCents), 0);
-  const weeklyExpenses = weekRows.reduce((sum, row) => sum + Math.max(0, -row.amountCents), 0);
+  const weekRows = ledger.filter((row) => dateKey(row.occurredAt) >= keyOf(lastWeek) && dateKey(row.occurredAt) <= today);
+  const weeklyRevenue = weekRows.reduce((sum, row) => sum + revenueCents(row), 0);
+  const weeklyExpenses = weekRows.reduce((sum, row) => sum + expenseCents(row), 0);
   const balance = (openingAudit?.actualBalanceCents ?? 0)
     + ledger.reduce((sum, row) => sum + row.amountCents, 0)
-    + adjustments.reduce((sum, row) => sum + row.amountCents, 0);
-  const firstSale = ledger.filter((row) => row.amountCents > 0).map((row) => dateKey(row.occurredAt)).sort()[0];
+    + funds.nonSalesDepositsCents;
+  const firstSale = ledger.filter((row) => revenueCents(row) > 0).map((row) => dateKey(row.occurredAt)).sort()[0];
   const semesterStart = settings?.semesterStart || firstSale || today;
   const closures = closuresFrom(settings?.closuresJson || "[]");
   const paceDays: string[] = [];
@@ -76,7 +78,7 @@ async function dailyReviewMessage(now = new Date()) {
   }
   const salesByDay = new Map<string, number>();
   for (const row of ledger) {
-    if (row.amountCents > 0) {
+    if (revenueCents(row) > 0) {
       const key = dateKey(row.occurredAt);
       salesByDay.set(key, (salesByDay.get(key) || 0) + row.amountCents);
     }
@@ -103,8 +105,7 @@ async function dailyReviewMessage(now = new Date()) {
   const balanceDisplay = currency(balance);
   const paceDisplay = paceDays.length ? `${currency(pace)}/day (${paceDays.length} of 14 days)` : "Waiting for approved revenue";
   const projection = paceDays.length ? `${currency(projectedBalance)} on ${keyOf(nextMonth)} (future expenses excluded)` : "Not enough data";
-  let goal = "No tracked goal yet";
-  if (checkpoint) {
+  const goals = checkpoints.map((checkpoint) => {
     const checkpointClosures = closuresFrom(checkpoint.closuresJson);
     let checkpointPaces: number[];
     try { checkpointPaces = JSON.parse(checkpoint.weekdayPacesJson) as number[]; } catch { checkpointPaces = []; }
@@ -118,8 +119,9 @@ async function dailyReviewMessage(now = new Date()) {
     const variance = balance - planned;
     const threshold = Math.max(200, checkpoint.dailyRevenueCents * .15);
     const status = balance >= checkpoint.targetCents ? "Goal reached" : variance < -threshold ? "Behind plan" : variance > threshold ? "Ahead of plan" : "On pace";
-    goal = `${currency(checkpoint.targetCents)} · ${status} (${variance >= 0 ? "+" : "-"}${currency(Math.abs(variance))} vs. original plan)`;
-  }
+    return `${currency(checkpoint.targetCents)} · ${status} (${variance >= 0 ? "+" : "-"}${currency(Math.abs(variance))} vs. original plan)`;
+  });
+  const goal = goals.join("; ") || "No tracked goal yet";
   const review = `${venmo} Venmo · ${amex} Amex`;
   const text = [title, `Revenue today: ${revenueToday}`, `Last 7 days: ${revenueWeek} revenue · ${expensesWeek} expenses`,
     `Operating balance: ${balanceDisplay}`, `Revenue pace: ${paceDisplay}`, `Projected balance: ${projection}`,

@@ -5,16 +5,17 @@ import { ArrowDownRight, ArrowUpRight, Award, BarChart3, CircleDollarSign, Loade
 import { Area, Cell, CartesianGrid, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
+import { businessDate } from "../lib/ledger-math";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
 type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum"; current: boolean };
 type Leader = { name: string; totalCents: number; purchases: number; awards: LeaderAward[] };
-type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; openingCardBalanceCents: number; nonSalesDepositsCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
+type OverviewData = { days: Day[]; weeklyDays: Day[]; pendingCount: number; latestCashCountAt: string | null; latestVenmoImportAt: string | null; latestVenmoSyncAt: string | null; openingCardBalanceCents: number; nonSalesDepositsCents: number; leaders: Leader[]; customerConcentration: { topThreeCents: number; everyoneElseCents: number; totalCents: number; customerCount: number } };
 
-const todayValue = new Date().toISOString().slice(0, 10);
+const todayValue = businessDate();
 const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 29);
-const monthAgoValue = monthAgo.toISOString().slice(0, 10);
-const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, latestCashCountAt: null, latestVenmoImportAt: null, openingCardBalanceCents: 0, nonSalesDepositsCents: 0, leaders: [], customerConcentration: { topThreeCents: 0, everyoneElseCents: 0, totalCents: 0, customerCount: 0 } };
+const monthAgoValue = businessDate(monthAgo);
+const emptyData: OverviewData = { days: [], weeklyDays: [], pendingCount: 0, latestCashCountAt: null, latestVenmoImportAt: null, latestVenmoSyncAt: null, openingCardBalanceCents: 0, nonSalesDepositsCents: 0, leaders: [], customerConcentration: { topThreeCents: 0, everyoneElseCents: 0, totalCents: 0, customerCount: 0 } };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 const localDate = (value: string) => new Date(`${value}T12:00:00`);
@@ -32,7 +33,7 @@ export default function OverviewClient() {
   useEffect(() => {
     fetch(`/api/overview?from=${monthAgoValue}&to=${todayValue}`)
       .then(async (response) => {
-        const result = await response.json();
+        const result = await response.json() as OverviewData & { error?: string };
         if (!response.ok) throw new Error(result.error || "Could not load the overview.");
         setData(result);
       })
@@ -47,7 +48,7 @@ export default function OverviewClient() {
     setError("");
     try {
       const response = await fetch(`/api/overview?from=${leaderFrom}&to=${leaderTo}`);
-      const result = await response.json();
+      const result = await response.json() as OverviewData & { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not update the leaderboard.");
       setData((current) => ({ ...current, leaders: result.leaders, customerConcentration: result.customerConcentration }));
     } catch (cause) {
@@ -61,21 +62,31 @@ export default function OverviewClient() {
     if (period === "all") return data.days;
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
-    cutoff.setDate(cutoff.getDate() - Number(period));
+    cutoff.setDate(cutoff.getDate() - Number(period) + 1);
     return data.days.filter((day) => localDate(day.date) >= cutoff);
   }, [data.days, period]);
+
+  const startingBalance = useMemo(() => {
+    const firstDate = filtered[0]?.date;
+    const earlier = period === "all" ? 0 : data.days
+      .filter((day) => !firstDate || day.date < firstDate)
+      .reduce((sum, day) => sum + day.revenueCents - day.expenseCents, 0);
+    return data.openingCardBalanceCents + earlier;
+  }, [data.days, data.openingCardBalanceCents, filtered, period]);
 
   const stats = useMemo(() => {
     const revenue = filtered.reduce((sum, day) => sum + day.revenueCents, 0);
     const expenses = filtered.reduce((sum, day) => sum + day.expenseCents, 0);
     const capital = data.nonSalesDepositsCents;
     const sales = filtered.reduce((sum, day) => sum + day.saleCount, 0);
-    const starting = period === "all" ? data.openingCardBalanceCents : 0;
-    return { revenue, expenses, capital, starting, net: starting + revenue + capital - expenses, sales, average: sales ? revenue / sales : 0 };
-  }, [data.nonSalesDepositsCents, data.openingCardBalanceCents, filtered, period]);
+    const starting = startingBalance;
+    const dates = new Set(filtered.map((day) => day.date));
+    const saleRevenue = data.weeklyDays.filter((day) => dates.has(day.date)).reduce((sum, day) => sum + day.revenueCents, 0);
+    return { revenue, expenses, capital, starting, net: starting + revenue + capital - expenses, sales, average: sales ? saleRevenue / sales : 0 };
+  }, [data.nonSalesDepositsCents, data.weeklyDays, startingBalance, filtered]);
 
   const chartData = useMemo(() => {
-    let cumulativeNet = (data.nonSalesDepositsCents + (period === "all" ? data.openingCardBalanceCents : 0)) / 100;
+    let cumulativeNet = (data.nonSalesDepositsCents + startingBalance) / 100;
     return filtered.map((day) => {
       cumulativeNet += (day.revenueCents - day.expenseCents) / 100;
       return {
@@ -84,8 +95,8 @@ export default function OverviewClient() {
         positive: Math.max(cumulativeNet, 0),
         negative: Math.min(cumulativeNet, 0),
       };
-    }).slice(-45);
-  }, [data.nonSalesDepositsCents, data.openingCardBalanceCents, filtered, period]);
+    });
+  }, [data.nonSalesDepositsCents, startingBalance, filtered]);
 
   const chartScale = useMemo(() => moneyChartScale(chartData.map((day) => day.net)), [chartData]);
   const concentrationData = useMemo(() => [
@@ -128,23 +139,23 @@ export default function OverviewClient() {
       <div className="nav-strip"><div className="public-tabs"><span className="public-tab active"><BarChart3 /> Overview</span><a className="public-tab" href="/awards"><Award /> Awards</a></div><label className="period-control">View <select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="all">All time</option></select></label></div>
       {loading ? <div className="loading-row"><Loader2 className="spin" /> Loading the books…</div> : error ? <div className="overview-error">{error}</div> : <div className="section-stack">
         <section className="hero-grid">
-          <article className="net-card"><span className="eyebrow light">Operating balance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{stats.sales} approved sales in this view{period !== "all" && data.openingCardBalanceCents > 0 ? " · starting card funds appear in All time" : ""}</p><div className="net-stripe">{stats.starting > 0 && <span>Starting card {money(stats.starting)}</span>}<span>Revenue {money(stats.revenue)}</span>{stats.capital > 0 && <span>Non-sales deposits {money(stats.capital)}</span>}<span>Expenses {money(stats.expenses)}</span></div></article>
+          <article className="net-card"><span className="eyebrow light">Operating balance</span><div className={stats.net >= 0 ? "net-number positive" : "net-number negative"}>{money(stats.net)}</div><p>{stats.sales} individual sales in this view</p><div className="net-stripe">{stats.starting > 0 && <span>{period === "all" ? "Starting funds" : "Opening balance"} {money(stats.starting)}</span>}<span>Revenue {money(stats.revenue)}</span>{stats.capital > 0 && <span>Non-sales deposits {money(stats.capital)}</span>}<span>Expenses {money(stats.expenses)}</span></div></article>
           <div className="stat-stack"><article><span>Revenue</span><strong>{money(stats.revenue)}</strong><ArrowUpRight /></article><article><span>Expenses</span><strong>{money(stats.expenses)}</strong><ArrowDownRight /></article><article><span>Average sale</span><strong>{money(stats.average)}</strong><CircleDollarSign /></article></div>
         </section>
         <section className="dashboard-grid">
           <div className="overview-chart-stack">
-            <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Operating balance over time</h2><p>Non-sales deposits are included in every balance point without counting as revenue.</p></div></div>
+            <article className="panel chart-panel"><div className="panel-heading"><div><span className="eyebrow">OPERATING GROWTH</span><h2>Operating balance over time</h2><p>Includes starting funds and non-sales deposits.</p></div></div>
             {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#d9d1c1"/><XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24}/><YAxis domain={chartScale.domain} ticks={chartScale.ticks} tickFormatter={(value) => chartMoney(Number(value))} tickLine={false} axisLine={false} width={64}/><Tooltip formatter={(value) => [money(Number(value) * 100), "Operating balance"]}/><Area type="monotone" dataKey="negative" stroke="none" fill="#b4493e" fillOpacity={.28} baseValue={0} tooltipType="none" isAnimationActive={false}/><Area type="monotone" dataKey="positive" stroke="none" fill="#356859" fillOpacity={.38} baseValue={0} tooltipType="none" isAnimationActive={false}/><ReferenceLine y={0} stroke="#8a938e" strokeDasharray="5 5" label={{ value: "Break-even", position: "insideTopRight", fill: "#68716b", fontSize: 12 }}/><Line type="monotone" dataKey="net" name="Operating balance" stroke="#26332e" strokeWidth={3} dot={false}/></ComposedChart></ResponsiveContainer></div> : <Empty text="Approved activity will appear here." />}
           </article>
-            <article className="panel concentration-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER MIX</span><h2>Customer concentration</h2><p>Top three customers compared with everyone else for the leaderboard dates.</p></div></div>
+            <article className="panel concentration-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER MIX</span><h2>Customer concentration</h2><p>For the selected leaderboard dates.</p></div></div>
             {data.customerConcentration.totalCents ? <div className="concentration-body"><div className="concentration-chart"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={concentrationData} dataKey="value" nameKey="name" innerRadius="62%" outerRadius="88%" paddingAngle={2} stroke="none">{concentrationData.map((slice) => <Cell key={slice.name} fill={slice.color}/>)}</Pie><Tooltip formatter={(value) => money(Number(value))}/></PieChart></ResponsiveContainer><div className="concentration-center"><strong>{topThreeShare}%</strong><span>from top 3</span></div></div><div className="concentration-legend">{concentrationData.map((slice) => <div key={slice.name}><span className="concentration-dot" style={{ background: slice.color }}/><div><strong>{slice.name}</strong><small>{data.customerConcentration.totalCents ? Math.round((slice.value / data.customerConcentration.totalCents) * 100) : 0}% of revenue</small></div><b>{money(slice.value)}</b></div>)}<p>{data.customerConcentration.customerCount} customer{data.customerConcentration.customerCount === 1 ? "" : "s"} in this range</p></div></div> : <Empty text="Customer mix will appear after approved sales."/>}
           </article>
           </div>
           <div className="overview-side-stack">
             <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><LeaderboardRank index={index}/><div className="buyer-details"><div className="buyer-name-line"><strong>{leader.name}</strong><LeaderAwards awards={leader.awards || []}/></div><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No approved sales in this date range."/>}</article>
-            <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoImportAt ? `Venmo activity last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo statement has been uploaded yet."}</p></article>
+            <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoSyncAt ? `Venmo last synced ${dateTime(data.latestVenmoSyncAt)}.` : data.latestVenmoImportAt ? `Venmo last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo activity imported yet."}</p></article>
           </div>
-          <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Venmo and manual activity aligned Sunday through Saturday; cash-box entries excluded.</p></div></div>
+          <article className="panel comparison-panel"><div className="panel-heading"><div><span className="eyebrow">LAST FOUR WEEKS</span><h2>Week-by-week revenue</h2><p>Venmo and manual sales, Sunday–Saturday.</p></div></div>
             {weeklyComparison.hasData ? <div className="comparison-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={weeklyComparison.rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#dde2de"/><XAxis dataKey="day" tickLine={false} axisLine={false}/><YAxis tickFormatter={(value) => `$${value}`} tickLine={false} axisLine={false} width={48}/><Tooltip formatter={(value) => money(Number(value) * 100)}/><Legend/>{weeklyComparison.weeks.map((week, index) => <Line key={week.key} type="monotone" dataKey={week.key} name={week.label} stroke={["#9aaea6", "#627a99", "#d58850", "#356859"][index]} strokeWidth={index === 3 ? 3 : 2} dot={{ r: index === 3 ? 4 : 3 }} activeDot={{ r: 5 }}/>)}</LineChart></ResponsiveContainer></div> : <Empty text="Revenue from the last four weeks will appear here." />}
           </article>
         </section>
