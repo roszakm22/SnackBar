@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { cardAudits, cashBoxEvents, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { getOperatingFunds } from "../../../lib/operating-funds";
 import { businessDate, expenseCents, revenueCents } from "../../../lib/ledger-math";
+import { countedLedgerCondition } from "../../../lib/sale-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
     const rows = await db
       .select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, counterparty: transactions.counterparty, source: transactions.source, originalType: transactions.originalType, classification: transactions.classification })
       .from(transactions)
-      .where(or(eq(transactions.classification, "snack_bar"), eq(transactions.classification, "card_refund")))
+      .where(countedLedgerCondition)
       .orderBy(asc(transactions.occurredAt));
 
     const days = new Map<string, { date: string; revenueCents: number; expenseCents: number; saleCount: number }>();

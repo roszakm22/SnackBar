@@ -5,7 +5,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 ## What it tracks
 
 - Money-in-only Venmo CSV imports with automatic duplicate detection
-- Optional Plaid sync for Venmo Personal receipts and American Express charges; new activity enters the manager's review queue
+- Optional Plaid sync for Venmo Personal receipts and American Express charges; incoming Venmos count provisionally as sales while still entering the manager's review queue
 - One-at-a-time classification as snack bar or personal
 - Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
@@ -44,7 +44,7 @@ The Worker has a Cron Trigger every four hours to fetch posted transactions. The
 
 ### Teams notifications
 
-SnackBar sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains approved revenue, expenses, operating balance, outlook, all tracked goals, and review counts. It does not include payer names or notes. The report starts only after configuration.
+SnackBar sends a daily metrics report at 5 PM America/Chicago (including days with zero pending). The report contains revenue (including unreviewed incoming Venmos), expenses, operating balance, outlook, all tracked goals, and review counts. It does not include payer names or notes. The report starts only after configuration.
 
 1. In Power Automate or Teams Workflows, create a flow using **When a Teams webhook request is received**. For a secret URL managed only by you, choose its **Anyone** authentication option; do not share the URL.
 2. Add **Parse JSON** with Content set using the `triggerBody()` expression. Paste the schema below. Do not include the Message Card `@type` or `@context` fields in the schema; Power Automate's editor interprets keys starting with `@` as expressions.

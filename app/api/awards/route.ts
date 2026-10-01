@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { outlookTargets, transactions } from "../../../db/schema";
 import { businessDate, businessMonthBounds } from "../../../lib/ledger-math";
+import { countedSalesCondition } from "../../../lib/sale-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export async function GET() {
       .select({ counterparty: transactions.counterparty, amountCents: transactions.amountCents })
       .from(transactions)
       .where(and(
-        eq(transactions.classification, "snack_bar"),
+        countedSalesCondition,
         or(
           eq(transactions.source, "venmo"),
           and(eq(transactions.source, "manual"), eq(transactions.originalType, "Manual award purchase")),

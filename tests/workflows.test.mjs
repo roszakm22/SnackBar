@@ -104,6 +104,29 @@ test('cash, deposits, purchases, refunds and audit differences stay consistent',
   assert.equal(noOrigin.status, 403);
 });
 
+test('unreviewed Venmo receipts count immediately and personal review reverses them', async () => {
+  const before = operating(await get('/api/overview'));
+  const csv = `ID,Datetime,Type,Status,From,To,Amount (total),Note\nprovisional-1,${today},Payment,Complete,Pat,SnackBar,+12.00,Snack`;
+  await post('import', { csv, fileName: 'provisional.csv' });
+  const pending = (await get()).pending.find(row => row.counterparty === 'Pat');
+  assert.ok(pending);
+  assert.ok((await get()).ledger.some(row => row.id === pending.id));
+  assert.equal(operating(await get('/api/overview')), before + 1200);
+  assert.equal((await get('/api/awards')).current.find(row => row.name === 'Pat').amountCents, 1200);
+  await post('review', { ids: [pending.id], classification: 'personal' });
+  assert.equal(operating(await get('/api/overview')), before);
+  assert.equal((await get('/api/awards')).current.some(row => row.name === 'Pat'), false);
+  assert.equal((await get()).ledger.some(row => row.id === pending.id), false);
+  await post('import', { csv, fileName: 'provisional.csv' });
+  assert.equal(operating(await get('/api/overview')), before, 'excluded payment stays excluded on re-import');
+  const secondCsv = `ID,Datetime,Type,Status,From,To,Amount (total),Note\nprovisional-2,${today},Payment,Complete,Kim,SnackBar,+15.00,Snack`;
+  await post('import', { csv: secondCsv, fileName: 'provisional-2.csv' });
+  const second = (await get()).pending.find(row => row.counterparty === 'Kim');
+  assert.equal(operating(await get('/api/overview')), before + 1500);
+  await post('review', { ids: [second.id], classification: 'snack_bar' });
+  assert.equal(operating(await get('/api/overview')), before + 1500, 'confirming a provisional sale does not count it twice');
+});
+
 test('CSV duplicates, manual awards and month close behave as expected', async () => {
   const previous = new Date(`${today.slice(0,7)}-01T12:00:00Z`); previous.setUTCMonth(previous.getUTCMonth() - 1);
   const date = previous.toISOString().slice(0,10);

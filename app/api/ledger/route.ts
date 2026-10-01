@@ -4,7 +4,8 @@ import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, ex
 import { parseVenmoCsv } from "../../../lib/csv";
 import { getCardSnapshot } from "../../../lib/card-audit";
 import { getOperatingFunds } from "../../../lib/operating-funds";
-import { businessDate, businessMonthBounds, isCardExpense } from "../../../lib/ledger-math";
+import { businessDate, businessMonthBounds, isCardExpense, isProvisionalSale } from "../../../lib/ledger-math";
+import { countedSalesCondition } from "../../../lib/sale-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ async function finalizeAwardsMonth(db: ReturnType<typeof getDb>, month: string, 
     .select({ amountCents: transactions.amountCents, counterparty: transactions.counterparty })
     .from(transactions)
     .where(and(
-      eq(transactions.classification, "snack_bar"),
+      countedSalesCondition,
       or(
         eq(transactions.source, "venmo"),
         and(eq(transactions.source, "manual"), eq(transactions.originalType, "Manual award purchase")),
@@ -118,13 +119,13 @@ export async function GET() {
     const now = new Date();
     const termAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() >= 6 ? 6 : 0, 1));
     const termRevenueDates = rows
-      .filter((row) => row.classification === "snack_bar" && row.amountCents > 0 && row.occurredAt >= termAnchor)
+      .filter((row) => (row.classification === "snack_bar" || isProvisionalSale(row)) && row.amountCents > 0 && row.occurredAt >= termAnchor)
       .map((row) => row.occurredAt)
       .sort((a, b) => a.getTime() - b.getTime());
     const defaultSemesterStart = (termRevenueDates[0] || now).toISOString().slice(0, 10);
     return Response.json({
       pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
-      ledger: rows.filter((row) => row.classification === "snack_bar" || row.classification === "card_refund").map(serialize),
+      ledger: rows.filter((row) => row.classification === "snack_bar" || row.classification === "card_refund" || isProvisionalSale(row)).map(serialize),
       nonSalesDepositsCents: operatingFunds.nonSalesDepositsCents,
       nonSalesDeposits: operatingFunds.deposits.map((row) => ({ ...row, occurredAt: row.occurredAt?.toISOString() ?? null })),
       personalCount,

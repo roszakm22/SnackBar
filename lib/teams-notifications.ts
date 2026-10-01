@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { cardAudits, forecastCheckpoints, forecastSettings, teamsNotificationRuns, transactions } from "../db/schema";
 import { getOperatingFunds } from "./operating-funds";
 import { expenseCents, revenueCents } from "./ledger-math";
+import { countedLedgerCondition } from "./sale-filter";
 
 function chicagoTime(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -53,7 +54,7 @@ async function dailyReviewMessage(now = new Date()) {
   }));
   const [ledger, [settings], checkpoints, [openingAudit], funds] = await Promise.all([
     db.select({ occurredAt: transactions.occurredAt, amountCents: transactions.amountCents, classification: transactions.classification })
-      .from(transactions).where(or(eq(transactions.classification, "snack_bar"), eq(transactions.classification, "card_refund"))),
+      .from(transactions).where(countedLedgerCondition),
     db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1),
     db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt)),
     db.select({ actualBalanceCents: cardAudits.actualBalanceCents }).from(cardAudits).orderBy(asc(cardAudits.checkedAt)).limit(1),
@@ -103,7 +104,7 @@ async function dailyReviewMessage(now = new Date()) {
   const revenueWeek = currency(weeklyRevenue);
   const expensesWeek = currency(weeklyExpenses);
   const balanceDisplay = currency(balance);
-  const paceDisplay = paceDays.length ? `${currency(pace)}/day (${paceDays.length} of 14 days)` : "Waiting for approved revenue";
+  const paceDisplay = paceDays.length ? `${currency(pace)}/day (${paceDays.length} of 14 days)` : "Waiting for revenue";
   const projection = paceDays.length ? `${currency(projectedBalance)} on ${keyOf(nextMonth)} (future expenses excluded)` : "Not enough data";
   const goals = checkpoints.map((checkpoint) => {
     const checkpointClosures = closuresFrom(checkpoint.closuresJson);

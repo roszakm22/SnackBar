@@ -1,5 +1,8 @@
 type Entry = { amountCents: number; classification?: string; source?: string };
 
+// Incoming Venmo receipts count as provisional sales until reviewed.
+export const isProvisionalSale = (row: Entry) => row.classification === "pending" && row.source === "venmo" && row.amountCents > 0;
+
 export const revenueCents = (row: Entry) => row.classification === "card_refund" ? 0 : Math.max(0, row.amountCents);
 export const expenseCents = (row: Entry) => row.classification === "card_refund" ? -row.amountCents : Math.max(0, -row.amountCents);
 export const isCardExpense = (row: Entry) => row.classification === "snack_bar" && row.amountCents < 0 && row.source !== "cash";

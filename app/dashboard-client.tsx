@@ -379,8 +379,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
 
   const review = async (classification: "snack_bar" | "personal" | "card_transfer" | "card_deposit" | "card_confirmed" | "card_refund") => {
     const current = data.pending[0]; if (!current) return;
-    const message = classification === "snack_bar" ? current.amountCents < 0 ? "Expense approved. Apply it in Card audit." : "Sale approved."
-      : classification === "personal" ? "Marked personal and discarded."
+    const message = classification === "snack_bar" ? current.amountCents < 0 ? "Expense approved. Apply it in Card audit." : "Sale confirmed."
+      : classification === "personal" ? "Marked personal. Provisional sale removed from totals."
       : classification === "card_transfer" ? "Venmo transfer added to the card audit, not sales."
       : classification === "card_refund" ? "Refund recorded against expenses."
       : classification === "card_confirmed" ? "Confirmed without adding another deposit."
@@ -426,7 +426,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </div>
 
           <TabsContent value="review" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2></div><div className="review-progress"><strong>{data.pending.length}</strong><span>left to review</span></div></div>
+            <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2><p>Incoming Venmos count as snack-bar sales until you mark them personal. Review each one when you can.</p></div><div className="review-progress"><strong>{data.pending.length}</strong><span>left to review</span></div></div>
             {loading ? <Loading/> : current ? <div className="review-stage"><article className="review-ticket">
               <div className="ticket-top"><Badge variant="outline">{current.source}</Badge><span>{shortDate(current.occurredAt)}</span></div>
               <div className={`review-amount ${current.amountCents >= 0 ? "positive" : "negative"}`}>{money(current.amountCents)}</div>
@@ -444,7 +444,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
                   <Button variant="outline" size="lg" disabled={busy} onClick={() => void review("personal")}><UserRound/> Ignore</Button>
                 </> : <>
                   <Button variant="outline" size="lg" disabled={busy} onClick={() => void review("personal")}><UserRound/> Personal</Button>
-                  <Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} {current.source === "amex" ? "Approve expense" : "Snack bar"}</Button>
+                  <Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} {current.source === "amex" ? "Approve expense" : "Confirm snack bar"}</Button>
                 </>}
               </div>
               {!(current.source === "amex" && current.amountCents > 0) && <p className="privacy-note">Personal entries are permanently excluded.</p>}
@@ -482,8 +482,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </TabsContent>
 
           <TabsContent value="ledger" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">APPROVED ACTIVITY</span><h2>The ledger</h2><p>Approved sales, purchases, refunds, and cash activity.</p></div><Button onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button></div>
-            <article className="panel table-panel">{loading ? <Loading/> : filtered.length ? <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Source</TableHead><TableHead>Person / account</TableHead><TableHead>Note</TableHead><TableHead className="amount-head">Amount</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell>{shortDate(row.occurredAt)}</TableCell><TableCell><Badge variant="outline">{row.classification === "card_refund" ? "refund" : row.source}</Badge></TableCell><TableCell>{row.counterparty || "—"}</TableCell><TableCell className="note-cell">{row.note || "—"}</TableCell><TableCell className={`amount-cell ${row.amountCents >= 0 ? "positive" : "negative"}`}>{money(row.amountCents)}</TableCell><TableCell><Button variant="ghost" size="icon-sm" aria-label="Delete transaction" disabled={busy} onClick={() => void remove(row.id)}><Trash2/></Button></TableCell></TableRow>)}</TableBody></Table> : <Empty text="No approved entries in this period."/>}</article>
+            <div className="page-heading"><div><span className="eyebrow">ACTIVITY</span><h2>The ledger</h2><p>Sales (including unreviewed Venmos), purchases, refunds, and cash activity.</p></div><Button onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button></div>
+<article className="panel table-panel">{loading ? <Loading/> : filtered.length ? <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Source</TableHead><TableHead>Person / account</TableHead><TableHead>Note</TableHead><TableHead className="amount-head">Amount</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell>{shortDate(row.occurredAt)}</TableCell><TableCell><Badge variant="outline">{row.classification === "card_refund" ? "refund" : row.classification === "pending" ? "venmo · unreviewed" : row.source}</Badge></TableCell><TableCell>{row.counterparty || "—"}</TableCell><TableCell className="note-cell">{row.note || "—"}</TableCell><TableCell className={`amount-cell ${row.amountCents >= 0 ? "positive" : "negative"}`}>{money(row.amountCents)}</TableCell><TableCell>{row.classification !== "pending" && <Button variant="ghost" size="icon-sm" aria-label="Delete transaction" disabled={busy} onClick={() => void remove(row.id)}><Trash2/></Button>}</TableCell></TableRow>)}</TableBody></Table> : <Empty text="No sales or expenses in this period."/>}</article>
             {data.batches.length > 0 && <History title="Recent imports">{data.batches.map((batch) => <div className="history-row" key={batch.id}><div className="history-icon"><Upload/></div><div><strong>{batch.fileName}</strong><span>{dateTime(batch.createdAt)}</span></div><b>{batch.importedCount} imported</b><em>{batch.duplicateCount} duplicates · {batch.skippedCount} skipped</em></div>)}</History>}
           </TabsContent>
         </Tabs>
