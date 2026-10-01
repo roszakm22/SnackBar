@@ -113,6 +113,12 @@ test('unreviewed Venmo receipts count immediately and personal review reverses t
   assert.ok((await get()).ledger.some(row => row.id === pending.id));
   assert.equal(operating(await get('/api/overview')), before + 1200);
   assert.equal((await get('/api/awards')).current.find(row => row.name === 'Pat').amountCents, 1200);
+  await post('skip_review', { id: pending.id, skip: true });
+  assert.equal((await get()).pending.some(row => row.id === pending.id), false);
+  assert.ok((await get()).skipped.some(row => row.id === pending.id));
+  assert.equal(operating(await get('/api/overview')), before + 1200, 'skipping must leave provisional sales intact');
+  await post('skip_review', { id: pending.id, skip: false });
+  assert.ok((await get()).pending.some(row => row.id === pending.id));
   await post('review', { ids: [pending.id], classification: 'personal' });
   assert.equal(operating(await get('/api/overview')), before);
   assert.equal((await get('/api/awards')).current.some(row => row.name === 'Pat'), false);

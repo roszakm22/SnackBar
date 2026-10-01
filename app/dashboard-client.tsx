@@ -21,7 +21,7 @@ import PlaidConnections from "./plaid-connections";
 
 type Transaction = {
   id: string; occurredAt: string; amountCents: number; classification: string; source: "venmo" | "amex" | "cash" | "manual";
-  direction: "incoming" | "outgoing"; counterparty: string; note: string; originalType: string; createdAt: string; reviewedAt: string | null;
+  direction: "incoming" | "outgoing"; counterparty: string; note: string; originalType: string; createdAt: string; reviewedAt: string | null; skippedAt: string | null;
 };
 type Batch = { id: string; fileName: string; importedCount: number; duplicateCount: number; skippedCount: number; createdAt: string };
 type CashEvent = { id: string; occurredAt: string; eventType: "count" | "withdrawal" | "deposit"; amountCents: number; billsCents: number; coinsCents: number; calculatedChangeCents: number; note: string };
@@ -31,14 +31,14 @@ type ForecastClosure = { id: string; label: string; start: string; end: string }
 type ForecastSettings = { semesterStart: string; closures: ForecastClosure[]; updatedAt: string | null };
 type ForecastCheckpoint = { id: string; targetCents: number; startingBalanceCents: number; dailyRevenueCents: number; weekdayPaces: number[]; projectedDate: string; closures: ForecastClosure[]; createdAt: string };
 type LedgerData = {
-  pending: Transaction[]; pendingCardOutflows: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
+  pending: Transaction[]; skipped: Transaction[]; pendingCardOutflows: Transaction[]; ledger: Transaction[]; personalCount: number; batches: Batch[]; cashEvents: CashEvent[];
   openingCardBalanceCents: number; nonSalesDepositsCents: number; nonSalesDeposits: Array<{ id: string; amountCents: number; occurredAt: string | null }>;
   cardAudit: { expectedBalanceCents: number; usesAmexTransfers: boolean; ledgerMovementCents: number; untransferredVenmoCents: number; otherDepositCents: number; adjustmentCents: number; cardOutflowCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[]; plaidBalanceCents: number | null; plaidBalanceCheckedAt: string | null; awaitingReview: boolean; awaitingTransfer: boolean };
   forecastSettings: ForecastSettings;
   forecastCheckpoints: ForecastCheckpoint[];
 };
 
-const emptyData: LedgerData = { pending: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, nonSalesDepositsCents: 0, nonSalesDeposits: [], cardAudit: { expectedBalanceCents: 0, usesAmexTransfers: false, ledgerMovementCents: 0, untransferredVenmoCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [], plaidBalanceCents: null, plaidBalanceCheckedAt: null, awaitingReview: false, awaitingTransfer: false }, forecastSettings: { semesterStart: "", closures: [], updatedAt: null }, forecastCheckpoints: [] };
+const emptyData: LedgerData = { pending: [], skipped: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, nonSalesDepositsCents: 0, nonSalesDeposits: [], cardAudit: { expectedBalanceCents: 0, usesAmexTransfers: false, ledgerMovementCents: 0, untransferredVenmoCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [], plaidBalanceCents: null, plaidBalanceCheckedAt: null, awaitingReview: false, awaitingTransfer: false }, forecastSettings: { semesterStart: "", closures: [], updatedAt: null }, forecastCheckpoints: [] };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" }).format(new Date(value));
@@ -88,6 +88,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [transferOpen, setTransferOpen] = useState(false);
   const [cardDepositOpen, setCardDepositOpen] = useState(false);
   const [reviewName, setReviewName] = useState<string | null>(null);
+  const [showSkipped, setShowSkipped] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -378,7 +379,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   };
 
   const review = async (classification: "snack_bar" | "personal" | "card_transfer" | "card_deposit" | "card_confirmed" | "card_refund") => {
-    const current = data.pending[0]; if (!current) return;
+    const current = (showSkipped ? data.skipped : data.pending)[0]; if (!current) return;
     const message = classification === "snack_bar" ? current.amountCents < 0 ? "Expense approved. Apply it in Card audit." : "Sale confirmed."
       : classification === "personal" ? "Marked personal. Provisional sale removed from totals."
       : classification === "card_transfer" ? "Venmo transfer added to the card audit, not sales."
@@ -389,12 +390,19 @@ export default function DashboardClient({ displayName }: { displayName: string }
     if (result) setReviewName(null);
   };
 
+  const skipReview = async (skip: boolean) => {
+    const current = (showSkipped ? data.skipped : data.pending)[0];
+    if (!current) return;
+    const result = await post({ action: "skip_review", id: current.id, skip }, skip ? "Moved to Skipped. You can review it later." : "Returned to the review queue.");
+    if (result) setReviewName(null);
+  };
+
   const remove = async (id: string) => {
     if (!window.confirm("Delete this ledger entry?")) return;
     await post({ action: "delete", id }, "Ledger entry deleted.");
   };
 
-  const current = data.pending[0];
+  const current = (showSkipped ? data.skipped : data.pending)[0];
   const latestCount = data.cashEvents.find((x) => x.eventType === "count");
   const latestCountHasBreakdown = Boolean(latestCount && latestCount.amountCents === latestCount.billsCents + latestCount.coinsCents);
   const latestAudit = data.cardAudit.lastAudit;
@@ -415,7 +423,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
           <div className="nav-strip">
             <TabsList variant="line">
               <a className="overview-nav-link" href="/"><BarChart3/> Overview</a>
-              <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length}</span></TabsTrigger>
+              <TabsTrigger value="review"><ClipboardCheck/> Review <span className="count-pill">{data.pending.length + data.skipped.length}</span></TabsTrigger>
               <TabsTrigger value="cash"><Banknote/> Cash box</TabsTrigger>
               <TabsTrigger value="card"><CreditCard/> Card audit</TabsTrigger>
               <TabsTrigger value="connections"><CreditCard/> Connections</TabsTrigger>
@@ -426,7 +434,8 @@ export default function DashboardClient({ displayName }: { displayName: string }
           </div>
 
           <TabsContent value="review" className="section-stack">
-            <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2><p>Incoming Venmos count as snack-bar sales until you mark them personal. Review each one when you can.</p></div><div className="review-progress"><strong>{data.pending.length}</strong><span>left to review</span></div></div>
+            <div className="page-heading"><div><span className="eyebrow">ONE AT A TIME</span><h2>Transaction review</h2><p>Incoming Venmos count as snack-bar sales until you mark them personal. Skipping leaves the totals unchanged.</p></div><div className="review-progress"><strong>{data.pending.length + data.skipped.length}</strong><span>left to review</span></div></div>
+            <div className="review-queue-switch"><Button variant={showSkipped ? "outline" : "default"} onClick={() => { setShowSkipped(false); setReviewName(null); }}>To review ({data.pending.length})</Button><Button variant={showSkipped ? "default" : "outline"} onClick={() => { setShowSkipped(true); setReviewName(null); }}>Skipped ({data.skipped.length})</Button></div>
             {loading ? <Loading/> : current ? <div className="review-stage"><article className="review-ticket">
               <div className="ticket-top"><Badge variant="outline">{current.source}</Badge><span>{shortDate(current.occurredAt)}</span></div>
               <div className={`review-amount ${current.amountCents >= 0 ? "positive" : "negative"}`}>{money(current.amountCents)}</div>
@@ -447,8 +456,9 @@ export default function DashboardClient({ displayName }: { displayName: string }
                   <Button size="lg" disabled={busy} onClick={() => void review("snack_bar")}>{busy ? <Loader2 className="spin"/> : <Check/>} {current.source === "amex" ? "Approve expense" : "Confirm snack bar"}</Button>
                 </>}
               </div>
+              <Button variant="outline" disabled={busy} onClick={() => void skipReview(!showSkipped)}>{showSkipped ? "Return to review queue" : "Skip for now"}</Button>
               {!(current.source === "amex" && current.amountCents > 0) && <p className="privacy-note">Personal entries are permanently excluded.</p>}
-            </article></div> : loadError ? null : <div className="all-clear"><Check/><h2>All caught up.</h2><p>No transactions waiting for review.</p></div>}
+            </article></div> : loadError ? null : <div className="all-clear"><Check/><h2>{showSkipped ? "Nothing skipped." : data.skipped.length ? "No other transactions to review." : "All caught up."}</h2><p>{showSkipped ? "Skipped transactions will wait here until you decide." : data.skipped.length ? "Your skipped transactions are still waiting in the Skipped view." : "No transactions waiting for review."}</p></div>}
           </TabsContent>
 
           <TabsContent value="connections" className="section-stack" forceMount>

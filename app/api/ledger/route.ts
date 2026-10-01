@@ -15,7 +15,7 @@ function errorResponse(error: unknown) {
 }
 
 function serialize(row: typeof transactions.$inferSelect) {
-  return { ...row, occurredAt: row.occurredAt.toISOString(), createdAt: row.createdAt.toISOString(), reviewedAt: row.reviewedAt?.toISOString() ?? null };
+  return { ...row, occurredAt: row.occurredAt.toISOString(), createdAt: row.createdAt.toISOString(), reviewedAt: row.reviewedAt?.toISOString() ?? null, skippedAt: row.skippedAt?.toISOString() ?? null };
 }
 
 function parseMoney(value: unknown) {
@@ -124,7 +124,8 @@ export async function GET() {
       .sort((a, b) => a.getTime() - b.getTime());
     const defaultSemesterStart = (termRevenueDates[0] || now).toISOString().slice(0, 10);
     return Response.json({
-      pending: rows.filter((row) => row.classification === "pending").slice(0, 250).map(serialize),
+      pending: rows.filter((row) => row.classification === "pending" && !row.skippedAt).slice(0, 250).map(serialize),
+      skipped: rows.filter((row) => row.classification === "pending" && row.skippedAt).slice(0, 250).map(serialize),
       ledger: rows.filter((row) => row.classification === "snack_bar" || row.classification === "card_refund" || isProvisionalSale(row)).map(serialize),
       nonSalesDepositsCents: operatingFunds.nonSalesDepositsCents,
       nonSalesDeposits: operatingFunds.deposits.map((row) => ({ ...row, occurredAt: row.occurredAt?.toISOString() ?? null })),
@@ -330,6 +331,18 @@ export async function POST(request: Request) {
         await db.insert(transactions).values(chunk.map((row) => ({ id: crypto.randomUUID(), sourceKey: row.sourceKey, importBatchId: batchId, occurredAt: row.occurredAt, amountCents: row.amountCents, source: "venmo" as const, direction: row.direction, counterparty: row.counterparty, note: row.note, originalType: row.originalType, originalStatus: row.originalStatus, classification: "pending" as const, createdAt: now })));
       }
       return Response.json({ imported: fresh.length, duplicates: parsed.transactions.length - fresh.length, skipped: parsed.skipped });
+    }
+
+    if (action === "skip_review") {
+      const id = String(body.id || "");
+      const skip = body.skip === true;
+      if (!id) return Response.json({ error: "Choose a transaction." }, { status: 400 });
+      const [row] = await db.select({ id: transactions.id }).from(transactions)
+        .where(and(eq(transactions.id, id), eq(transactions.classification, "pending"))).limit(1);
+      if (!row) return Response.json({ error: "This transaction is no longer waiting for review." }, { status: 404 });
+      await db.update(transactions).set({ skippedAt: skip ? new Date() : null })
+        .where(and(eq(transactions.id, id), eq(transactions.classification, "pending")));
+      return Response.json({ skipped: skip });
     }
 
     if (action === "review") {

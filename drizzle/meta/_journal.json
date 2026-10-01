@@ -99,6 +99,13 @@
       "when": 1790629397766,
       "tag": "0013_separate_cash_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790879222949,
+      "tag": "0014_lonely_grandmaster",
+      "breakpoints": true
     }
   ]
 }

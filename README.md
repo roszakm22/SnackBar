@@ -7,6 +7,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Money-in-only Venmo CSV imports with automatic duplicate detection
 - Optional Plaid sync for Venmo Personal receipts and American Express charges; incoming Venmos count provisionally as sales while still entering the manager's review queue
 - One-at-a-time classification as snack bar or personal
+- Persistent Skip for now option; skipped transactions stay unreviewed in their own review view without changing sales totals
 - Approved revenue, expenses, net performance, and a running growth-after-expenses chart
 - Cash-box counts, deposits, and withdrawals
 - Card balance audits against confirmed transfers, posted card expenses, and non-sales deposits

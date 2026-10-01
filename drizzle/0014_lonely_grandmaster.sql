@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `skipped_at` integer;

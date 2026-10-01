@@ -141,6 +141,7 @@ export const transactions = sqliteTable(
     classification: text("classification", { enum: ["pending", "snack_bar", "personal", "card_transfer", "card_deposit", "card_confirmed", "card_refund"] }).notNull().default("pending"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
+    skippedAt: integer("skipped_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     uniqueIndex("idx_transactions_source_key").on(table.sourceKey),
