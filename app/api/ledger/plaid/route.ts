@@ -1,6 +1,6 @@
 import {
   connectItem, createLinkToken, disconnectPlaid, getPlaidConnection,
-  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, auditAmexBalance, plaidTransactionsLastUpdated, forcePlaidTransactionsRefresh,
+  listPlaidConnections, plaidConfigured, plaidConfigurationIssues, plaidRedirectUri, refreshConnectedAccounts, syncConnection, refreshAndSyncVenmo, auditAmexBalance, plaidTransactionsLastUpdated,
   type PlaidKind,
 } from "../../../../lib/plaid";
 import { sendTeamsReportNow, teamsConfigured } from "../../../../lib/teams-notifications";
@@ -61,16 +61,12 @@ export async function POST(request: Request) {
     }
     if (action === "sync") {
       if (!connection) return Response.json({ error: "Connection not found." }, { status: 404 });
-      const synced = await syncConnection(connection);
+      const synced = kind === "venmo" ? await refreshAndSyncVenmo(connection) : await syncConnection(connection);
       const [status, audit] = await Promise.all([
         plaidTransactionsLastUpdated(connection).catch(() => null),
         kind === "amex" ? auditAmexBalance(connection) : Promise.resolve(null),
       ]);
       return Response.json({ ...synced, transactionsStatus: status, ...(audit ? { audit } : {}) });
-    }
-    if (action === "force_refresh") {
-      if (kind !== "venmo" || !connection) return Response.json({ error: "Connect Venmo first." }, { status: 400 });
-      return Response.json(await forcePlaidTransactionsRefresh(connection));
     }
     if (action === "audit") {
       if (kind !== "amex" || !connection) return Response.json({ error: "Connect Amex checking first." }, { status: 400 });

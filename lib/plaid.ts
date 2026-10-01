@@ -279,12 +279,33 @@ export async function forcePlaidTransactionsRefresh(connection: Connection) {
   return { requested: true };
 }
 
+export async function refreshAndSyncVenmo(connection: Connection) {
+  if (connection.kind !== "venmo") throw new Error("Only Venmo uses automatic Transactions Refresh.");
+  let refreshError: string | null = null;
+  try {
+    await forcePlaidTransactionsRefresh(connection);
+  } catch (error) {
+    refreshError = error instanceof Error ? error.message : "Plaid refresh failed.";
+    console.error("Plaid Venmo refresh failed:", refreshError);
+  }
+  const synced = await syncConnection(connection);
+  if (refreshError) {
+    await getDb().update(plaidConnections).set({ lastError: `Venmo refresh failed: ${refreshError}`.slice(0, 300) })
+      .where(eq(plaidConnections.kind, "venmo"));
+  }
+  return { ...synced, refreshError };
+}
+
 export async function syncPlaidConnections() {
   if (!plaidConfigured()) return;
   const connections = await getDb().select().from(plaidConnections);
   for (const connection of connections) {
     try {
-      await syncConnection(connection);
+      if (connection.kind === "venmo" && (env as unknown as Record<string, string | undefined>).PLAID_AUTO_REFRESH !== "false") {
+        await refreshAndSyncVenmo(connection);
+      } else {
+        await syncConnection(connection);
+      }
       if (connection.kind === "amex") await auditAmexBalance(connection);
     }
     catch (error) { console.error(`Plaid ${connection.kind} sync failed:`, error instanceof Error ? error.message : error); }

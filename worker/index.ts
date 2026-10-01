@@ -45,7 +45,7 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
   async scheduled(event: { cron: string }, _env: Env, ctx: ExecutionContext): Promise<void> {
-    if (event.cron === "0 */4 * * *") ctx.waitUntil(syncPlaidConnections());
+    if (event.cron === "0 * * * *") ctx.waitUntil(syncPlaidConnections());
     if (event.cron === "*/10 * * * *") ctx.waitUntil(sendTeamsNotifications());
   },
 };

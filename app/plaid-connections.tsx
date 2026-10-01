@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 type Kind = "venmo" | "amex";
 type Connection = { kind: Kind; connectedAt: string; lastSyncedAt: string | null; lastError: string | null };
-type SyncResult = { imported: number; received: { total: number; pendingIncoming: number; otherAccount: number; outgoing: number; beforeConnection: number }; transactionsStatus: { last_successful_update?: string | null; last_failed_update?: string | null } | null };
+type SyncResult = { imported: number; received: { total: number; pendingIncoming: number; otherAccount: number; outgoing: number; beforeConnection: number }; transactionsStatus: { last_successful_update?: string | null; last_failed_update?: string | null } | null; refreshError?: string | null };
 type PlaidHandler = { open: () => void; destroy: () => void };
 declare global {
   interface Window {
@@ -138,19 +138,10 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
     try {
       const result = await plaidApi({ action: "sync", kind }) as SyncResult;
       setSyncResults((current) => ({ ...current, [kind]: result }));
-      toast.success(`Synced ${kind === "venmo" ? "Venmo" : "Amex"}: ${result.imported} new to review.`);
+      if (result.refreshError) toast.warning(`Plaid could not refresh Venmo: ${result.refreshError} Synced its previously available data instead.`);
+      else toast.success(`${kind === "venmo" ? "Refreshed and synced Venmo" : "Synced Amex"}: ${result.imported} new to review.`);
       await refresh(); await onChangedRef.current();
     } catch (error) { toast.error(error instanceof Error ? error.message : "Sync failed."); }
-    finally { setBusy(false); }
-  };
-
-  const forceRefresh = async () => {
-    if (!window.confirm("Request an on-demand Venmo refresh? Plaid may charge a per-request fee for Transactions Refresh.")) return;
-    setBusy(true);
-    try {
-      await plaidApi({ action: "force_refresh", kind: "venmo" });
-      toast.success("Plaid refresh requested. Wait a few minutes, then select Sync now.");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Plaid refresh failed."); }
     finally { setBusy(false); }
   };
 
@@ -187,7 +178,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   return (
     <section className="panel plaid-panel">
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
-        <p>Imports run every four hours. New activity goes to Review.</p></div></div>
+        <p>Checks run hourly. Venmo asks Plaid for fresh data before syncing; Amex syncs its latest available data. New activity goes to Review.</p></div></div>
       {!configured && <p>Account connections are not configured yet.</p>}
       <div className="plaid-account"><div><strong>Teams report</strong><span>{teamsReady ? "Configured · Daily metrics report at 5 PM Chicago time" : "Report not configured"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
       {(["venmo", "amex"] as Kind[]).map((kind) => {
@@ -199,8 +190,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
             {connection?.lastError && <small className="plaid-error">{connection.lastError}</small>}</div>
           <div className="plaid-actions">
             {connection ? <>
-              <Button variant="outline" disabled={busy} onClick={() => void sync(kind)}>Sync now</Button>
-              {kind === "venmo" && <Button variant="outline" disabled={busy} onClick={() => void forceRefresh()}>Force Plaid refresh</Button>}
+              <Button variant="outline" disabled={busy} onClick={() => void sync(kind)}>{kind === "venmo" ? "Refresh + sync now" : "Sync now"}</Button>
               <Button variant="outline" disabled={busy} onClick={() => void start(kind, true)}>Reconnect</Button>
               <Button variant="outline" disabled={busy} onClick={() => void disconnect(kind)}>Disconnect</Button>
             </> : <Button disabled={busy || !configured} onClick={() => void start(kind, false)}>Connect {kind === "venmo" ? "Venmo" : "Amex"}</Button>}
