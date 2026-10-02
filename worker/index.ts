@@ -44,8 +44,15 @@ const worker = {
 
     return handler.fetch(request, env, ctx);
   },
-  async scheduled(event: { cron: string }, _env: Env, ctx: ExecutionContext): Promise<void> {
-    if (event.cron === "0 * * * *") ctx.waitUntil(syncPlaidConnections());
+  async scheduled(event: { cron: string; scheduledTime: number }, _env: Env, ctx: ExecutionContext): Promise<void> {
+    const chicagoHour = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(event.scheduledTime));
+    if (event.cron === "*/30 * * * *" && chicagoHour >= 10 && chicagoHour < 22) {
+      ctx.waitUntil(syncPlaidConnections());
+    }
     if (event.cron === "*/10 * * * *") ctx.waitUntil(sendTeamsNotifications());
   },
 };

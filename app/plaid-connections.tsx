@@ -178,7 +178,7 @@ export default function PlaidConnections({ onChanged }: { onChanged: () => Promi
   return (
     <section className="panel plaid-panel">
       <div className="panel-heading"><div><span className="eyebrow">AUTOMATIC IMPORT</span><h2>Connected accounts</h2>
-        <p>Checks run hourly. Venmo asks Plaid for fresh data before syncing; Amex syncs its latest available data. New activity goes to Review.</p></div></div>
+        <p>Checks run every 30 minutes from 10 AM to 10 PM Chicago time. Venmo asks Plaid for fresh data before syncing; Amex syncs its latest available data. New activity goes to Review.</p></div></div>
       {!configured && <p>Account connections are not configured yet.</p>}
       <div className="plaid-account"><div><strong>Teams report</strong><span>{teamsReady ? "Configured · Daily metrics report at 5 PM Chicago time" : "Report not configured"}</span></div>{teamsReady && <Button variant="outline" disabled={busy} onClick={() => void sendTeamsReport()}>Send report now</Button>}</div>
       {(["venmo", "amex"] as Kind[]).map((kind) => {
