@@ -163,6 +163,25 @@ test('legacy cash transfers are distinguished from donations during migration', 
   db.close();
 });
 
+test('hiding a name removes public scores but preserves its sales and can be reversed', async () => {
+  const before = await get('/api/overview');
+  assert.ok(before.leaders.some(row => row.name === 'Kim'));
+  assert.ok((await get('/api/awards')).history.some(row => row.name === 'Alex'));
+  await post('hide_score_name', { name: '  kIm  ' });
+  await post('hide_score_name', { name: 'Alex' });
+  assert.ok((await get()).hiddenScoreNames.some(row => row.name === 'Alex'));
+  const hidden = await get('/api/overview');
+  assert.equal(hidden.leaders.some(row => row.name === 'Kim'), false);
+  assert.equal(operating(hidden), operating(before));
+  assert.equal(hidden.customerConcentration.totalCents, before.customerConcentration.totalCents);
+  assert.equal((await get('/api/awards')).current.some(row => row.name === 'Kim'), false);
+  assert.equal((await get('/api/awards')).history.some(row => row.name === 'Alex'), false);
+  await post('show_score_name', { nameKey: 'kim' });
+  await post('show_score_name', { nameKey: 'alex' });
+  assert.ok((await get('/api/overview')).leaders.some(row => row.name === 'Kim'));
+  assert.ok((await get('/api/awards')).history.some(row => row.name === 'Alex'));
+});
+
 test('dates and card-expense eligibility use the intended business rules', () => {
   assert.equal(businessDate(new Date('2026-10-01T03:30:00Z')), '2026-09-30');
   assert.equal(businessMonthBounds('2026-09').end.toISOString(), '2026-10-01T05:00:00.000Z');

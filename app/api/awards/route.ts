@@ -1,8 +1,9 @@
 import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { outlookTargets, transactions } from "../../../db/schema";
+import { hiddenScoreNames, outlookTargets, transactions } from "../../../db/schema";
 import { businessDate, businessMonthBounds } from "../../../lib/ledger-math";
 import { countedSalesCondition } from "../../../lib/sale-filter";
+import { scoreNameKey } from "../../../lib/hidden-scores";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ const tierFor = (amountCents: number) =>
 export async function GET() {
   try {
     const db = getDb();
+    const hiddenNames = new Set((await db.select({ nameKey: hiddenScoreNames.nameKey }).from(hiddenScoreNames)).map((row) => row.nameKey));
     const currentMonth = businessDate().slice(0, 7);
     const { start, end } = businessMonthBounds(currentMonth);
     const currentRows = await db
@@ -45,10 +47,12 @@ export async function GET() {
       .sort((a, b) => b.localeCompare(a));
     const history = saved
       .filter((row) => row.id.startsWith("award:") && row.label && row.targetCents >= 1500)
+      .filter((row) => !hiddenNames.has(scoreNameKey(row.label)))
       .map((row) => ({ month: row.targetDate, name: row.label, amountCents: row.targetCents, tier: tierFor(row.targetCents) }))
       .sort((a, b) => b.month.localeCompare(a.month) || b.amountCents - a.amountCents);
 
     const current = [...currentTotals.entries()]
+      .filter(([name]) => !hiddenNames.has(scoreNameKey(name)))
       .map(([name, amountCents]) => ({ name, amountCents, tier: tierFor(amountCents) }))
       .sort((a, b) => b.amountCents - a.amountCents);
 

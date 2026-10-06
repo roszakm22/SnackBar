@@ -36,9 +36,10 @@ type LedgerData = {
   cardAudit: { expectedBalanceCents: number; usesAmexTransfers: boolean; ledgerMovementCents: number; untransferredVenmoCents: number; otherDepositCents: number; adjustmentCents: number; cardOutflowCents: number; hasBaseline: boolean; lastAudit: CardAudit | null; history: CardAudit[]; adjustments: CardAdjustment[]; plaidBalanceCents: number | null; plaidBalanceCheckedAt: string | null; awaitingReview: boolean; awaitingTransfer: boolean };
   forecastSettings: ForecastSettings;
   forecastCheckpoints: ForecastCheckpoint[];
+  hiddenScoreNames: Array<{ name: string; nameKey: string }>;
 };
 
-const emptyData: LedgerData = { pending: [], skipped: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, nonSalesDepositsCents: 0, nonSalesDeposits: [], cardAudit: { expectedBalanceCents: 0, usesAmexTransfers: false, ledgerMovementCents: 0, untransferredVenmoCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [], plaidBalanceCents: null, plaidBalanceCheckedAt: null, awaitingReview: false, awaitingTransfer: false }, forecastSettings: { semesterStart: "", closures: [], updatedAt: null }, forecastCheckpoints: [] };
+const emptyData: LedgerData = { pending: [], skipped: [], pendingCardOutflows: [], ledger: [], personalCount: 0, batches: [], cashEvents: [], openingCardBalanceCents: 0, nonSalesDepositsCents: 0, nonSalesDeposits: [], cardAudit: { expectedBalanceCents: 0, usesAmexTransfers: false, ledgerMovementCents: 0, untransferredVenmoCents: 0, otherDepositCents: 0, adjustmentCents: 0, cardOutflowCents: 0, hasBaseline: false, lastAudit: null, history: [], adjustments: [], plaidBalanceCents: null, plaidBalanceCheckedAt: null, awaitingReview: false, awaitingTransfer: false }, forecastSettings: { semesterStart: "", closures: [], updatedAt: null }, forecastCheckpoints: [], hiddenScoreNames: [] };
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const shortDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" }).format(new Date(value));
@@ -89,6 +90,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
   const [cardDepositOpen, setCardDepositOpen] = useState(false);
   const [reviewName, setReviewName] = useState<string | null>(null);
   const [showSkipped, setShowSkipped] = useState(false);
+  const [scoreName, setScoreName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -402,6 +404,12 @@ export default function DashboardClient({ displayName }: { displayName: string }
     await post({ action: "delete", id }, "Ledger entry deleted.");
   };
 
+  const hideScoreName = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = await post({ action: "hide_score_name", name: scoreName }, "Name hidden from public scores.");
+    if (result) setScoreName("");
+  };
+
   const current = (showSkipped ? data.skipped : data.pending)[0];
   const latestCount = data.cashEvents.find((x) => x.eventType === "count");
   const latestCountHasBreakdown = Boolean(latestCount && latestCount.amountCents === latestCount.billsCents + latestCount.coinsCents);
@@ -494,6 +502,7 @@ export default function DashboardClient({ displayName }: { displayName: string }
           <TabsContent value="ledger" className="section-stack">
             <div className="page-heading"><div><span className="eyebrow">ACTIVITY</span><h2>The ledger</h2><p>Sales (including unreviewed Venmos), purchases, refunds, and cash activity.</p></div><Button onClick={() => setManualOpen(true)}><Plus/> Manual entry</Button></div>
 <article className="panel table-panel">{loading ? <Loading/> : filtered.length ? <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Source</TableHead><TableHead>Person / account</TableHead><TableHead>Note</TableHead><TableHead className="amount-head">Amount</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell>{shortDate(row.occurredAt)}</TableCell><TableCell><Badge variant="outline">{row.classification === "card_refund" ? "refund" : row.classification === "pending" ? "venmo · unreviewed" : row.source}</Badge></TableCell><TableCell>{row.counterparty || "—"}</TableCell><TableCell className="note-cell">{row.note || "—"}</TableCell><TableCell className={`amount-cell ${row.amountCents >= 0 ? "positive" : "negative"}`}>{money(row.amountCents)}</TableCell><TableCell>{row.classification !== "pending" && <Button variant="ghost" size="icon-sm" aria-label="Delete transaction" disabled={busy} onClick={() => void remove(row.id)}><Trash2/></Button>}</TableCell></TableRow>)}</TableBody></Table> : <Empty text="No sales or expenses in this period."/>}</article>
+            <article className="panel"><div className="panel-heading"><div><span className="eyebrow">PUBLIC SCORES</span><h2>Hidden names</h2><p>Hide someone from the public leaderboard and awards, including past results. Their purchases still count toward revenue, balance, and forecasts.</p></div></div><form onSubmit={hideScoreName} className="score-hide-form"><Label htmlFor="score-hide-name">Name as it appears on Venmo</Label><div><Input id="score-hide-name" value={scoreName} onChange={(event) => setScoreName(event.target.value)} placeholder="Customer name" maxLength={120} required/><Button disabled={busy || !scoreName.trim()}>Hide name</Button></div></form>{data.hiddenScoreNames.length > 0 && <div className="score-hidden-list">{data.hiddenScoreNames.map((person) => <div key={person.nameKey}><span>{person.name}</span><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void post({ action: "show_score_name", nameKey: person.nameKey }, "Name restored to public scores.")}>Show again</Button></div>)}</div>}</article>
             {data.batches.length > 0 && <History title="Recent imports">{data.batches.map((batch) => <div className="history-row" key={batch.id}><div className="history-icon"><Upload/></div><div><strong>{batch.fileName}</strong><span>{dateTime(batch.createdAt)}</span></div><b>{batch.importedCount} imported</b><em>{batch.duplicateCount} duplicates · {batch.skippedCount} skipped</em></div>)}</History>}
           </TabsContent>
         </Tabs>

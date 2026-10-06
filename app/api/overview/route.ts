@@ -1,9 +1,10 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAudits, cashBoxEvents, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
+import { cardAudits, cashBoxEvents, hiddenScoreNames, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { getOperatingFunds } from "../../../lib/operating-funds";
 import { businessDate, expenseCents, revenueCents } from "../../../lib/ledger-math";
 import { countedLedgerCondition } from "../../../lib/sale-filter";
+import { scoreNameKey } from "../../../lib/hidden-scores";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,7 @@ export async function GET(request: Request) {
     const toValue = searchParams.get("to");
     const from = fromValue && /^\d{4}-\d{2}-\d{2}$/.test(fromValue) ? fromValue : "1970-01-01";
     const to = toValue && /^\d{4}-\d{2}-\d{2}$/.test(toValue) ? toValue : businessDate();
+    const hiddenNames = new Set((await db.select({ nameKey: hiddenScoreNames.nameKey }).from(hiddenScoreNames)).map((row) => row.nameKey));
     const leaders = new Map<string, { name: string; totalCents: number; purchases: number }>();
     rows.filter((row) => row.source !== "cash" && revenueCents(row) > 0 && row.counterparty && businessDate(row.occurredAt) >= from && businessDate(row.occurredAt) <= to).forEach((row) => {
       const current = leaders.get(row.counterparty) || { name: row.counterparty, totalCents: 0, purchases: 0 };
@@ -90,6 +92,7 @@ export async function GET(request: Request) {
     });
     awardsByName.forEach((awards) => awards.sort((a, b) => Number(b.current) - Number(a.current) || b.month.localeCompare(a.month)));
     const rankedLeaders = [...leaders.values()].sort((a, b) => b.totalCents - a.totalCents);
+    const visibleLeaders = rankedLeaders.filter((leader) => !hiddenNames.has(scoreNameKey(leader.name)));
 
     const [{ count: pendingCount }] = await db
       .select({ count: sql<number>`count(*)` })
@@ -109,7 +112,7 @@ export async function GET(request: Request) {
       latestVenmoSyncAt: venmoConnection?.lastSyncedAt?.toISOString() ?? null,
       openingCardBalanceCents: openingAudit?.actualBalanceCents ?? 0,
       nonSalesDepositsCents,
-      leaders: rankedLeaders.slice(0, 10).map((leader) => ({
+      leaders: visibleLeaders.slice(0, 10).map((leader) => ({
         ...leader,
         awards: awardsByName.get(leader.name.trim().toLowerCase()) || [],
       })),

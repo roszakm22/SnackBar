@@ -1,11 +1,12 @@
 import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
+import { cardAdjustments, cardAudits, cardOutflowApplications, cashBoxEvents, excludedKeys, forecastCheckpoints, forecastSettings, hiddenScoreNames, importBatches, outlookTargets, plaidConnections, transactions } from "../../../db/schema";
 import { parseVenmoCsv } from "../../../lib/csv";
 import { getCardSnapshot } from "../../../lib/card-audit";
 import { getOperatingFunds } from "../../../lib/operating-funds";
 import { businessDate, businessMonthBounds, isCardExpense, isProvisionalSale } from "../../../lib/ledger-math";
 import { countedSalesCondition } from "../../../lib/sale-filter";
+import { scoreNameKey } from "../../../lib/hidden-scores";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,7 @@ export async function GET() {
     const rows = await db.select().from(transactions).orderBy(desc(transactions.occurredAt), desc(transactions.createdAt));
     const [savedForecastSettings] = await db.select().from(forecastSettings).where(eq(forecastSettings.id, "primary")).limit(1);
     const savedForecastCheckpoints = await db.select().from(forecastCheckpoints).orderBy(desc(forecastCheckpoints.createdAt));
+    const hiddenNames = await db.select({ name: hiddenScoreNames.name, nameKey: hiddenScoreNames.nameKey }).from(hiddenScoreNames).orderBy(asc(hiddenScoreNames.name));
     const batchRows = await db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(20);
     const usedBatchIds = new Set(rows.map((row) => row.importBatchId).filter(Boolean));
     const batches = batchRows.filter((batch) => usedBatchIds.has(batch.id)).slice(0, 8);
@@ -171,6 +173,7 @@ export async function GET() {
         closures: parseClosures(savedForecastCheckpoint.closuresJson),
         createdAt: savedForecastCheckpoint.createdAt.toISOString(),
       })),
+      hiddenScoreNames: hiddenNames,
     });
   } catch (error) {
     return errorResponse(error);
@@ -185,6 +188,20 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = String(body.action || "");
     const db = getDb();
+
+    if (action === "hide_score_name") {
+      const name = String(body.name || "").trim().replace(/\s+/g, " ");
+      if (!name || name.length > 120) return Response.json({ error: "Enter a name up to 120 characters." }, { status: 400 });
+      await db.insert(hiddenScoreNames).values({ nameKey: scoreNameKey(name), name, createdAt: new Date() }).onConflictDoNothing();
+      return Response.json({ saved: true });
+    }
+
+    if (action === "show_score_name") {
+      const nameKey = scoreNameKey(String(body.nameKey || ""));
+      if (!nameKey) return Response.json({ error: "Choose a hidden name." }, { status: 400 });
+      await db.delete(hiddenScoreNames).where(eq(hiddenScoreNames.nameKey, nameKey));
+      return Response.json({ deleted: true });
+    }
 
     if (action === "forecast_settings") {
       const semesterStart = String(body.semesterStart || "");

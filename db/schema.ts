@@ -14,6 +14,12 @@ export const excludedKeys = sqliteTable("excluded_keys", {
   excludedAt: integer("excluded_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const hiddenScoreNames = sqliteTable("hidden_score_names", {
+  nameKey: text("name_key").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const teamsNotificationEvents = sqliteTable("teams_notification_events", {
   transactionId: text("transaction_id").primaryKey().references(() => transactions.id, { onDelete: "cascade" }),
   queuedAt: integer("queued_at", { mode: "timestamp_ms" }).notNull(),
