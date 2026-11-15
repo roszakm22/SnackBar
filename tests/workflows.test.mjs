@@ -198,3 +198,46 @@ test('all public and manager pages render successfully', async () => {
     assert.doesNotMatch(html, /Internal Server Error|ReferenceError|TypeError:/, path);
   }
 });
+
+test('SQL quote flags publish only eligible purchases with the selected name', async () => {
+  const runSql = (text) => {
+    const file = join(state, 'quote-fixtures.sql');
+    writeFileSync(file, text);
+    execFileSync(process.execPath, [wrangler, 'd1', 'execute', 'DB', ...local, '--file', file], { env, stdio: 'pipe' });
+  };
+  const literal = (value) => value === null ? 'NULL' : typeof value === 'number' ? String(value) : `'${value.replaceAll("'", "''")}'`;
+  const now = Date.now();
+  const fixtures = [
+    ['visible', 'Exact words 😘', 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+    ['duplicate', 'Exact words 😘', 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+    ['unselected', 'Next selected note', 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', now, 0],
+    ['hidden', 'Hidden note', '  HIDDEN   Customer ', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+    ['pending', 'Pending note', 'Quote Customer', 'venmo', 'incoming', 100, 'pending', now, 1],
+    ['personal', 'Personal note', 'Quote Customer', 'venmo', 'incoming', 100, 'personal', now, 1],
+    ['unreviewed', 'Unreviewed note', 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', null, 1],
+    ['outgoing', 'Expense note', 'Quote Customer', 'venmo', 'outgoing', -100, 'snack_bar', now, 1],
+    ['zero', 'Zero payment', 'Quote Customer', 'venmo', 'incoming', 0, 'snack_bar', now, 1],
+    ['amex', 'Card note', 'Quote Customer', 'amex', 'incoming', 100, 'snack_bar', now, 1],
+    ['empty', '   ', 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+    ['long', 'x'.repeat(501), 'Quote Customer', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+    ['nameless', 'No purchaser', '   ', 'venmo', 'incoming', 100, 'snack_bar', now, 1],
+  ].map(([id, note, name, source, direction, amount, classification, reviewed, flag]) =>
+    `(${['quote-' + id, 'quote-test-' + id, now, amount, source, direction, name, note, classification, now, reviewed, flag].map(literal).join(',')})`);
+  assert.deepEqual(await get('/api/snack-quotes'), [], 'existing purchases are not selected by default');
+  runSql(`INSERT INTO hidden_score_names (name_key,name,created_at) VALUES ('hidden customer','Hidden Customer',${now});
+    INSERT INTO transactions (id,source_key,occurred_at,amount_cents,source,direction,counterparty,note,classification,created_at,reviewed_at,show_as_quote) VALUES ${fixtures.join(',')};`);
+  const response = await fetch(base + '/api/snack-quotes');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const quotes = await response.json();
+  assert.equal(quotes.length, 1);
+  assert.deepEqual(Object.keys(quotes[0]).sort(), ['id', 'name', 'text']);
+  assert.equal(quotes[0].text, 'Exact words 😘');
+  assert.equal(quotes[0].name, 'Quote Customer');
+  assert.match(quotes[0].id, /^quote-[a-f0-9]{64}$/);
+  assert.deepEqual(await get('/api/snack-quotes'), quotes, 'public IDs stay stable');
+  runSql("UPDATE transactions SET show_as_quote = 0 WHERE id IN ('quote-visible','quote-duplicate'); UPDATE transactions SET show_as_quote = 1 WHERE id = 'quote-unselected';");
+  assert.deepEqual((await get('/api/snack-quotes')).map(row => row.text), ['Next selected note'], 'SQL changes the list without a deployment');
+  runSql(`INSERT INTO hidden_score_names (name_key,name,created_at) VALUES ('quote customer','Quote Customer',${now});`);
+  assert.deepEqual(await get('/api/snack-quotes'), [], 'hiding a customer removes already-selected quotes');
+});

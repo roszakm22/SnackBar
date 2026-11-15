@@ -148,6 +148,7 @@ export const transactions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
     skippedAt: integer("skipped_at", { mode: "timestamp_ms" }),
+    showAsQuote: integer("show_as_quote", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("idx_transactions_source_key").on(table.sourceKey),

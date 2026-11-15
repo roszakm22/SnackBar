@@ -29,30 +29,37 @@ Personal transactions are removed after classification. Only an irreversible sou
 
 ### Homepage quotes
 
-The homepage's **Overheard at the Snack Bar** card reads `public/snack-quotes.json`.
-Keep this a small, hand-picked list of real purchase notes, using this shape:
+The homepage's **Overheard at the Snack Bar** card reads `/api/snack-quotes`.
+The `transactions.show_as_quote` column in production D1 controls the selection:
+`1` means selected (checked), and `0` means unselected. It defaults to `0` for
+existing and new transactions. Set it directly in the database; no application
+checkbox or new deployment is needed when changing the selection:
 
-```json
-[{ "id": "unique-stable-quote-id", "text": "Exact selected purchase note" }]
+```sql
+-- Replace the placeholder with the ID of a reviewed purchase.
+UPDATE transactions SET show_as_quote = 1 WHERE id = 'selected-purchase-id';
+-- Remove a quote without deleting the purchase.
+UPDATE transactions SET show_as_quote = 0 WHERE id = 'selected-purchase-id';
 ```
 
-The example above describes the format; it is not a real quote. The initial list
-is empty until actual notes can be reviewed. An empty or unavailable list shows
-a short invitation, not fabricated purchase notes. One quote displays without
+The public endpoint returns only selected, reviewed, positive incoming Venmo
+purchases classified as `snack_bar`, with a nonblank note of up to 500 characters
+and a nonblank purchaser name. It displays the exact note and purchaser name;
+customers hidden from public scores remain excluded even if their flag is set.
+Public quote IDs are derived from the displayed text and name, never transaction
+IDs. Amounts, timestamps, source keys, and other ledger fields stay private.
+Identical notes from the same purchaser display once.
+
+An empty or unavailable list shows a short invitation. One quote displays without
 rotation controls; multiple quotes shuffle once per visit and rotate every nine
 seconds. Rotation pauses on hover, keyboard focus, manual navigation, and hidden
 tabs. Reduced-motion visitors use the arrows without automatic rotation.
 
-For a weekly refresh, review the latest notes in the protected `/manage` ledger,
-choose a few funny standalone lines, and update this JSON file through the normal
-GitHub deployment. Keep a few favorites and remove weaker repeats. Copy only the
-selected note text (up to 500 characters), without payer names, transaction IDs,
-amounts, or other private details. Do not publish notes from personal/excluded
-transactions or customers hidden from public scores. Never invent or rewrite a
-note as if it were a customer's words. The public file is the complete curated
-list; the card never reads or exposes the private ledger. No admin controls or
-automatic quote selection are added. A recurring review requires a separate
-scheduled task and authenticated access to the ledger.
+For a refresh, review actual purchase notes and mark a few funny standalone
+lines. Avoid note text containing private details. Never invent or rewrite a
+note as if it were a customer's words. Only the selected notes and their names
+are published; the card does not expose the private ledger. A recurring review
+requires a separate scheduled task and authenticated database access.
 
 ### Worker configuration
 
@@ -126,9 +133,9 @@ The daytime Plaid sync is separate from the ten-minute cron that checks for the 
 
 Venmo's Plaid descriptions may not include the payer's name. Check and edit each name in the review queue before approving it; missing names are blocked from approval. Amex checking credits can be classified as Venmo transfers, donations / added funds, purchase refunds, or already-recorded deposits. Refunds reduce expenses rather than increasing revenue. Confirmed deposits update the card audit. Amex purchases enter review as expenses and, once approved, wait under **Expenses to apply** until you apply them to the card audit. When Amex is connected, the audit uses confirmed Amex transfers instead of Venmo sales to track money reaching the account. If a donation or cash-to-card transfer was already recorded manually, choose **Already recorded** on the matching Amex credit so it is not counted twice. Check for duplicate manual deposits and expenses before applying imported activity. After each scheduled sync (or **Refresh Amex balance**), Plaid reads the existing Amex checking connection’s current posted balance and creates an automatic card audit when no Venmo or Amex items or card expenses remain to review and tracked Venmo receipts have reached Amex. The first eligible balance sets the baseline; you can still enter a manual balance if Plaid Balance is unavailable. Outgoing Venmo transfers are ignored; incoming Amex refunds use **Purchase refund** in review. CSV import still works for historical dates before Venmo was connected; overlapping CSVs are blocked to avoid double-counting. To close a month when using Plaid, review all of its Venmo payments and then use **Finalize awards** in Connections. Verify the last Plaid sync before closing, because late posted transactions cannot be included after an award month is finalized.
 
-The root page, `/awards`, `/api/overview`, and `/api/awards` stay public. The overview API returns daily aggregates, leaderboard totals, and operational timestamps. The awards API returns customer names, monthly purchase totals, and earned tiers. Neither API returns Venmo notes, individual transactions, cash balances, or current card balances.
+The root page, `/awards`, `/api/overview`, `/api/awards`, and `/api/snack-quotes` stay public. The overview API returns daily aggregates, leaderboard totals, and operational timestamps. The awards API returns customer names, monthly purchase totals, and earned tiers. Neither overview nor awards returns Venmo notes, individual transactions, cash balances, or current card balances. The quotes API publishes only explicitly selected eligible notes and their purchaser names.
 
-The production D1 database is already configured as `snackbar-ledger` with the `DB` binding.
+The production Worker is `snackbar-ledger`; its D1 database is named `snackbar` and uses the `DB` binding.
 
 For local development, run `npm ci` followed by `npm run dev`. The local Worker uses a project-local D1 database.
 

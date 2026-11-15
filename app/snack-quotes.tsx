@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MessageSquareQuote, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type SnackQuote = { id: string; text: string };
+type SnackQuote = { id: string; text: string; name: string };
 const ROTATION_MS = 9000;
 
 export default function SnackQuotes() {
@@ -18,17 +18,17 @@ export default function SnackQuotes() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/snack-quotes.json", { signal: controller.signal, cache: "no-store" })
+    fetch("/api/snack-quotes", { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Quotes unavailable");
         const data: unknown = await response.json();
         if (!Array.isArray(data)) return;
         const seen = new Set<string>();
         const selected = data.filter((item): item is SnackQuote => {
-          if (!item || typeof item.id !== "string" || !item.id.trim() || typeof item.text !== "string" || !item.text.trim() || item.text.length > 500 || seen.has(item.id)) return false;
+          if (!item || typeof item.id !== "string" || !item.id.trim() || typeof item.text !== "string" || !item.text.trim() || item.text.length > 500 || typeof item.name !== "string" || !item.name.trim() || seen.has(item.id)) return false;
           seen.add(item.id);
           return true;
-        }).map(({ id, text }) => ({ id, text }));
+        }).map(({ id, text, name }) => ({ id, text, name }));
         // Shuffle once per visit; no quote repeats until the whole list has played.
         for (let i = selected.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -85,6 +85,7 @@ export default function SnackQuotes() {
     {quote ? <>
       <div className="snack-quote-stage" aria-live={rotating ? "off" : "polite"} aria-atomic="true">
         <blockquote key={quote.id} className="snack-quote-text">“{quote.text}”</blockquote>
+        <p className="snack-quote-attribution">— {quote.name}</p>
       </div>
       <div className="snack-quote-footer">
         <span>Snack bar hall of fame</span>
