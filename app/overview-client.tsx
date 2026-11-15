@@ -6,6 +6,7 @@ import { Area, Cell, CartesianGrid, ComposedChart, Legend, Line, LineChart, Pie,
 import { Button } from "@/components/ui/button";
 import { chartMoney, moneyChartScale } from "./chart-utils";
 import { businessDate } from "../lib/ledger-math";
+import SnackQuotes from "./snack-quotes";
 
 type Day = { date: string; revenueCents: number; expenseCents: number; saleCount: number };
 type LeaderAward = { month: string; tier: "bronze" | "silver" | "gold" | "platinum"; current: boolean };
@@ -152,6 +153,7 @@ export default function OverviewClient() {
           </article>
           </div>
           <div className="overview-side-stack">
+            <SnackQuotes />
             <article className="panel leaderboard-panel"><div className="panel-heading"><div><span className="eyebrow">TOP SUPPORTERS</span><h2><Trophy/> Leaderboard</h2></div></div><form className="leaderboard-range" onSubmit={updateLeaderboard}><label>From<input type="date" value={leaderFrom} max={leaderTo} onChange={(event) => setLeaderFrom(event.target.value)} required/></label><label>To<input type="date" value={leaderTo} min={leaderFrom} onChange={(event) => setLeaderTo(event.target.value)} required/></label><Button size="sm" disabled={leaderLoading}>{leaderLoading ? <Loader2 className="spin"/> : "Update"}</Button></form>{data.leaders.length ? <ol className="buyer-list">{data.leaders.map((leader, index) => <li key={leader.name}><LeaderboardRank index={index}/><div className="buyer-details"><div className="buyer-name-line"><strong>{leader.name}</strong><LeaderAwards awards={leader.awards || []}/></div><small>{leader.purchases} purchase{leader.purchases === 1 ? "" : "s"}</small></div><b>{money(leader.totalCents)}</b></li>)}</ol> : <Empty text="No sales in this date range."/>}</article>
             <article className="panel pulse-panel"><span className="eyebrow">QUICK CHECK</span><h2>{data.pendingCount ? `${data.pendingCount} waiting for review` : "Review queue is clear"}</h2><p>{data.latestCashCountAt ? `Cash box last counted ${dateTime(data.latestCashCountAt)}.` : "The cash box has not been counted yet."}</p><p>{data.latestVenmoSyncAt ? `Venmo last synced ${dateTime(data.latestVenmoSyncAt)}.` : data.latestVenmoImportAt ? `Venmo last uploaded ${dateTime(data.latestVenmoImportAt)}.` : "No Venmo activity imported yet."}</p></article>
           </div>

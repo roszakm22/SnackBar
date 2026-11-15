@@ -16,6 +16,7 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 - Donations and other added funds included consistently in the overview, outlooks, Teams report, and card audit without counting as sales
 - Manual ledger entries
 - Public performance overview at `/`
+- Curated purchase-note carousel on the overview, with a fresh shuffle each visit, nine-second rotation, and pause/previous/next controls
 - Public customer leaderboard with a selectable date range
 - Manager-controlled hidden names for public leaderboard and awards; sales remain in all financial totals, and names can be restored later
 - Public monthly awards at `/awards`: Bronze at $15, Silver at $25, Gold at $35, and Platinum at $50
@@ -25,6 +26,35 @@ A Cloudflare-hosted tracker for Det 930's snack bar. It imports Venmo statement 
 Personal transactions are removed after classification. Only an irreversible source key is retained so the same transaction is not imported again.
 
 ## Cloudflare setup
+
+### Homepage quotes
+
+The homepage's **Overheard at the Snack Bar** card reads `public/snack-quotes.json`.
+Keep this a small, hand-picked list of real purchase notes, using this shape:
+
+```json
+[{ "id": "unique-stable-quote-id", "text": "Exact selected purchase note" }]
+```
+
+The example above describes the format; it is not a real quote. The initial list
+is empty until actual notes can be reviewed. An empty or unavailable list shows
+a short invitation, not fabricated purchase notes. One quote displays without
+rotation controls; multiple quotes shuffle once per visit and rotate every nine
+seconds. Rotation pauses on hover, keyboard focus, manual navigation, and hidden
+tabs. Reduced-motion visitors use the arrows without automatic rotation.
+
+For a weekly refresh, review the latest notes in the protected `/manage` ledger,
+choose a few funny standalone lines, and update this JSON file through the normal
+GitHub deployment. Keep a few favorites and remove weaker repeats. Copy only the
+selected note text (up to 500 characters), without payer names, transaction IDs,
+amounts, or other private details. Do not publish notes from personal/excluded
+transactions or customers hidden from public scores. Never invent or rewrite a
+note as if it were a customer's words. The public file is the complete curated
+list; the card never reads or exposes the private ledger. No admin controls or
+automatic quote selection are added. A recurring review requires a separate
+scheduled task and authenticated access to the ledger.
+
+### Worker configuration
 
 This is a Vinext Cloudflare Worker with a D1 database.
 

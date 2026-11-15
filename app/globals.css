@@ -2,6 +2,22 @@
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
+.snack-quotes{background:#e8efeb!important;border-color:#cbd9d0!important}
+.snack-quotes-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.snack-quotes-heading .eyebrow{font-size:10px;color:#52695d}
+.snack-quotes-heading h2{margin:5px 0 0;font-size:19px;line-height:1.25;font-weight:730;letter-spacing:-.025em}
+.snack-quotes-heading>svg{flex:0 0 25px;width:25px;height:25px;color:#356859}
+.snack-quote-stage{min-height:122px;display:flex;align-items:center;padding:22px 0}
+.snack-quote-text{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:clamp(21px,2vw,27px);line-height:1.35;color:#294f45;overflow-wrap:anywhere;white-space:pre-wrap;animation:snack-quote-in .4s ease-out}
+.snack-quote-footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-top:12px;border-top:1px solid #cbd9d0}
+.snack-quote-footer>span{font-size:11px;color:#52695d}
+.snack-quote-controls{display:flex;align-items:center;gap:2px;color:#294f45}
+.snack-quote-controls button{min-width:36px;min-height:36px}
+.snack-quote-count{min-width:36px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums}
+.snack-quotes-empty{margin:20px 0 4px;color:#52695d;font-size:14px;line-height:1.6}
+@keyframes snack-quote-in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.snack-quote-text{animation:none}}
+
 :root {
   --background:#f4f5f3; --foreground:#202520; --card:#ffffff; --card-foreground:#202520;
   --popover:#ffffff; --popover-foreground:#202520; --primary:#356859; --primary-foreground:#ffffff;
